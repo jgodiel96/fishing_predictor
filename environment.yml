@@ -1,0 +1,41 @@
+name: fishing_predictor
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  # Core
+  - python=3.11
+  - pip
+
+  # Data handling
+  - numpy
+  - pandas
+  - xarray
+  - netcdf4
+
+  # HTTP requests
+  - requests
+  - aiohttp
+
+  # Geospatial
+  - geopandas
+  - shapely
+  - pyproj
+
+  # Scientific
+  - scipy
+  - scikit-learn
+  - scikit-image
+
+  # Astronomy
+  - ephem
+  - astral
+
+  # Visualization
+  - folium
+  - matplotlib
+  - branca
+
+  # Utilities
+  - python-dateutil
+  - pytz

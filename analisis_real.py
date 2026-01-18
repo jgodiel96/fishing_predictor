@@ -2,6 +2,7 @@
 """
 Análisis de Pesca con Datos REALES de OpenStreetMap.
 Usa la línea costera descargada de OSM para garantizar precisión.
+Incluye datos meteorológicos y cálculos solunares.
 """
 
 import sys
@@ -13,6 +14,8 @@ from datetime import datetime
 from typing import List, Tuple, Dict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from core.weather_solunar import get_fishing_conditions, WeatherFetcher, SolunarCalculator
 
 
 class RealCoastlineAnalyzer:
@@ -195,6 +198,56 @@ class RealCoastlineAnalyzer:
 
         return self.fish_zones
 
+    # Especies por tipo de zona
+    SPECIES_BY_SUBSTRATE = {
+        "roca": ["Cabrilla", "Pintadilla", "Robalo", "Cherlo"],
+        "arena": ["Corvina", "Lenguado", "Pejerrey", "Chita"],
+        "mixto": ["Corvina", "Cabrilla", "Robalo", "Pejerrey"]
+    }
+
+    SPECIES_LURES = {
+        "Cabrilla": "Grubs 3\", jigs 15-25g",
+        "Pintadilla": "Vinilos pequeños, jigs ligeros",
+        "Robalo": "Poppers 12cm, minnows, walk-the-dog",
+        "Corvina": "Jigs metálicos 30-50g, vinilos paddle",
+        "Lenguado": "Vinilos paddle tail, jigs de fondo",
+        "Pejerrey": "Cucharillas pequeñas, sabikis",
+        "Chita": "Carnada natural, jigs pequeños",
+        "Cherlo": "Grubs, jigs de roca"
+    }
+
+    def get_species_for_point(self, point: Dict) -> List[Dict]:
+        """Obtiene especies recomendadas para un punto."""
+        # Determinar tipo de sustrato basado en características
+        # Por ahora usamos una heurística simple
+        lat = point['lat']
+
+        # Zonas rocosas típicas (puntas y acantilados)
+        rocky_zones = [(-17.7, -17.65), (-17.82, -17.78), (-18.0, -17.95)]
+        sandy_zones = [(-18.15, -18.05), (-17.93, -17.88)]
+
+        substrate = "mixto"
+        for (lat_min, lat_max) in rocky_zones:
+            if lat_min <= lat <= lat_max:
+                substrate = "roca"
+                break
+        for (lat_min, lat_max) in sandy_zones:
+            if lat_min <= lat <= lat_max:
+                substrate = "arena"
+                break
+
+        species_names = self.SPECIES_BY_SUBSTRATE.get(substrate, ["Corvina", "Cabrilla"])
+
+        species = []
+        for name in species_names[:3]:
+            species.append({
+                "name": name,
+                "lure": self.SPECIES_LURES.get(name, "Varios señuelos"),
+                "substrate": substrate
+            })
+
+        return species
+
     def analyze(self):
         """
         Calcula scores para cada punto de la orilla.
@@ -203,6 +256,8 @@ class RealCoastlineAnalyzer:
             self.generate_fish_zones()
 
         for point in self.sampled_points:
+            # Agregar especies recomendadas
+            point['species'] = self.get_species_for_point(point)
             best_score = 0
             best_dist = float('inf')
             best_dir = 0
@@ -411,6 +466,7 @@ class RealCoastlineAnalyzer:
 def main():
     print("=" * 70)
     print("   🎣 ANÁLISIS CON LÍNEA COSTERA REAL (OpenStreetMap)")
+    print("   + Clima en tiempo real + Datos solunares")
     print("=" * 70)
     print(f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     print()
@@ -423,7 +479,7 @@ def main():
         print("ERROR: Primero descarga la costa con el comando anterior")
         return
 
-    print("[1/4] Cargando línea costera REAL de OSM...")
+    print("[1/5] Cargando línea costera REAL de OSM...")
     num_points = analyzer.load_coastline(coastline_file)
     print(f"      Puntos de costa: {num_points}")
 
@@ -447,8 +503,28 @@ def main():
 
     # Analizar
     print()
-    print("[4/4] Analizando y optimizando...")
+    print("[4/5] Analizando y optimizando...")
     results = analyzer.analyze()
+
+    # Obtener condiciones meteorológicas y solunares
+    print()
+    print("[5/5] Obteniendo clima y datos solunares...")
+    center_lat = np.mean([p[0] for p in analyzer.coastline_points])
+    center_lon = np.mean([p[1] for p in analyzer.coastline_points])
+
+    conditions = get_fishing_conditions(center_lat, center_lon)
+
+    weather = conditions.get("weather", {})
+    solunar = conditions.get("solunar", {})
+
+    print(f"      🌡️  Temperatura: {weather.get('temperature', 'N/A')}°C")
+    print(f"      💨 Viento: {weather.get('wind_speed', 'N/A')} km/h")
+    print(f"      🌙 Luna: {solunar.get('moon_phase', 'N/A')} ({solunar.get('moon_illumination', 'N/A')})")
+    print(f"      ⭐ Rating del día: {solunar.get('day_rating', 'N/A')}/100")
+
+    if weather.get('warnings'):
+        for warn in weather['warnings']:
+            print(f"      ⚠️  {warn}")
 
     # Resultados
     print()
@@ -462,6 +538,11 @@ def main():
         print(f"   Coordenadas: {point['lat']:.6f}, {point['lon']:.6f}")
         print(f"   Distancia a peces: {point['distance_to_fish']:.0f}m")
 
+        # Mostrar especies
+        if 'species' in point and point['species']:
+            species_names = [s['name'] for s in point['species']]
+            print(f"   Especies: {', '.join(species_names)}")
+
     # Mejor
     best = results[0]
     print()
@@ -472,6 +553,18 @@ def main():
     print(f"   Lon: {best['lon']:.6f}")
     print(f"   Score: {best['score']:.1f}/100")
     print(f"   Peces a {best['distance_to_fish']:.0f}m en dirección {best['direction_to_fish']:.0f}°")
+
+    if 'species' in best and best['species']:
+        print()
+        print("   🐟 ESPECIES RECOMENDADAS:")
+        for sp in best['species']:
+            print(f"      • {sp['name']}: {sp['lure']}")
+
+    print()
+    print("   ⏰ MEJORES HORARIOS:")
+    print(f"      {solunar.get('best_times', 'Amanecer y atardecer')}")
+    print(f"      🌅 Amanecer: {solunar.get('sunrise', 'N/A')}")
+    print(f"      🌇 Atardecer: {solunar.get('sunset', 'N/A')}")
 
     # Mapa
     print()

@@ -1,19 +1,23 @@
 """
 Core modules for Fishing Spot Predictor.
-Robust, error-proof architecture.
 """
 
-from .coastline import CoastlineModel, CoastlineSegment
-from .transects import TransectAnalyzer, Transect
-from .fish_movement import FishMovementPredictor, MovementVector
-from .scoring import ScoringEngine
+from .coastline_real import RealCoastline, CoastPoint, load_coastline
+from .weather_solunar import (
+    WeatherConditions,
+    SolunarData,
+    WeatherFetcher,
+    SolunarCalculator,
+    get_fishing_conditions
+)
 
 __all__ = [
-    'CoastlineModel',
-    'CoastlineSegment',
-    'TransectAnalyzer',
-    'Transect',
-    'FishMovementPredictor',
-    'MovementVector',
-    'ScoringEngine'
+    'RealCoastline',
+    'CoastPoint',
+    'load_coastline',
+    'WeatherConditions',
+    'SolunarData',
+    'WeatherFetcher',
+    'SolunarCalculator',
+    'get_fishing_conditions'
 ]

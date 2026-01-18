@@ -334,11 +334,18 @@ class RealCoastline:
 
 def load_coastline(data_manager=None) -> RealCoastline:
     """
-    Carga la línea costera, descargándola si es necesario.
+    Carga la línea costera real de OSM.
 
     Returns:
         Instancia de RealCoastline
     """
+    # Preferir el archivo OSM real si existe
+    osm_path = Path(__file__).parent.parent / "data" / "cache" / "coastline_real_osm.geojson"
+
+    if osm_path.exists():
+        return RealCoastline(str(osm_path))
+
+    # Fallback: usar DataManager para descargar
     if data_manager is None:
         from data.data_manager import DataManager
         data_manager = DataManager()

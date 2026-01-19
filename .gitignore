@@ -16,8 +16,9 @@ build/
 *.ipynb_checkpoints
 
 # Cache de datos (se regenera)
-data/cache/*.parquet
-data/cache/*.geojson
+data/cache/
+data/historical/
+data/real_only/
 
 # Output generado
 output/*.html

@@ -10,6 +10,15 @@ from .weather_solunar import (
     SolunarCalculator,
     get_fishing_conditions
 )
+from .marine_data import (
+    MarineDataFetcher,
+    ThermalFrontDetector,
+    FishZonePredictor,
+    MarinePoint,
+    ThermalFront,
+    CurrentVector,
+    SSTHistory
+)
 
 __all__ = [
     'RealCoastline',
@@ -19,5 +28,12 @@ __all__ = [
     'SolunarData',
     'WeatherFetcher',
     'SolunarCalculator',
-    'get_fishing_conditions'
+    'get_fishing_conditions',
+    'MarineDataFetcher',
+    'ThermalFrontDetector',
+    'FishZonePredictor',
+    'MarinePoint',
+    'ThermalFront',
+    'CurrentVector',
+    'SSTHistory'
 ]

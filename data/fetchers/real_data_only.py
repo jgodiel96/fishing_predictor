@@ -383,23 +383,31 @@ class RealDataFetcher:
         end_date: str
     ) -> List[RealFishingEvent]:
         """
-        Fetch REAL fishing activity from Global Fishing Watch.
+        Fetch REAL fishing activity from Global Fishing Watch 4Wings API.
 
-        Requires GFW_API_KEY environment variable.
+        Requires GFW_API_KEY environment variable (or GFW_API_ACCESS_TOKEN).
+        API Docs: https://globalfishingwatch.org/our-apis/documentation
         """
         print("\n[FISHING] Fetching REAL fishing activity from Global Fishing Watch...")
 
-        if not self.gfw_api_key:
+        # Check for API key (support both variable names)
+        api_key = self.gfw_api_key or os.environ.get('GFW_API_ACCESS_TOKEN', '')
+
+        if not api_key:
             raise RealDataError(
-                "GFW_API_KEY not set. Cannot fetch real fishing data.\n"
+                "GFW API key not set. Cannot fetch real fishing data.\n"
                 "Get a free API key at: https://globalfishingwatch.org/our-apis/\n"
-                "Then set: export GFW_API_KEY='your_key_here'"
+                "Then set: export GFW_API_KEY='your_key_here'\n"
+                "   or: export GFW_API_ACCESS_TOKEN='your_key_here'"
             )
 
-        headers = {"Authorization": f"Bearer {self.gfw_api_key}"}
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
 
-        # Define region polygon
-        polygon = {
+        # Define region polygon (GeoJSON format)
+        geojson_region = {
             "type": "Polygon",
             "coordinates": [[
                 [self.REGION['lon_min'], self.REGION['lat_min']],
@@ -410,56 +418,117 @@ class RealDataFetcher:
             ]]
         }
 
-        try:
-            # GFW 4Wings API for fishing effort
-            response = requests.post(
-                "https://gateway.api.globalfishingwatch.org/v3/4wings/report",
-                headers=headers,
-                json={
-                    "datasets": ["public-global-fishing-effort:latest"],
-                    "date-range": [start_date, end_date],
-                    "region": polygon,
-                    "spatial-resolution": "low",
-                    "temporal-resolution": "daily",
-                    "group-by": ["flag", "geartype"]
-                },
-                timeout=120
+        # GFW API has a 366-day limit, so we may need to chunk
+        from datetime import datetime, timedelta
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+
+        all_events = []
+        chunk_start = start_dt
+
+        while chunk_start < end_dt:
+            chunk_end = min(chunk_start + timedelta(days=365), end_dt)
+            chunk_start_str = chunk_start.strftime("%Y-%m-%d")
+            chunk_end_str = chunk_end.strftime("%Y-%m-%d")
+
+            print(f"[FISHING] Requesting {chunk_start_str} to {chunk_end_str}...")
+
+            # Build URL with query parameters (per GFW API docs)
+            base_url = "https://gateway.api.globalfishingwatch.org/v3/4wings/report"
+            params = {
+                "spatial-resolution": "LOW",
+                "temporal-resolution": "MONTHLY",
+                "group-by": "FLAGANDGEARTYPE",
+                "datasets[0]": "public-global-fishing-effort:latest",
+                "date-range": f"{chunk_start_str},{chunk_end_str}",
+                "format": "JSON"
+            }
+
+            # Region goes in the body
+            body = {"geojson": geojson_region}
+
+            try:
+                response = requests.post(
+                    base_url,
+                    params=params,
+                    headers=headers,
+                    json=body,
+                    timeout=120
+                )
+
+                print(f"[FISHING] Response status: {response.status_code}")
+
+                if response.status_code == 200:
+                    data = response.json()
+
+                    # Parse response - GFW format has nested structure
+                    # entries[0]["public-global-fishing-effort:v3.0"] contains the data
+                    entries = data.get('entries', [])
+                    fishing_records = []
+
+                    for entry in entries:
+                        # Each entry is a dict with dataset name as key
+                        for dataset_key, records in entry.items():
+                            if isinstance(records, list):
+                                fishing_records.extend(records)
+
+                    for record in fishing_records:
+                        date_val = record.get('date', '')  # Format: YYYY-MM
+                        hours_val = record.get('hours', 0)
+                        lat = record.get('lat', 0)
+                        lon = record.get('lon', 0)
+
+                        if hours_val and hours_val > 0:
+                            # Convert YYYY-MM to YYYY-MM-01 for consistency
+                            if len(str(date_val)) == 7:
+                                date_val = f"{date_val}-01"
+
+                            all_events.append(RealFishingEvent(
+                                date=str(date_val)[:10],
+                                lat=float(lat),
+                                lon=float(lon),
+                                fishing_hours=float(hours_val),
+                                vessel_id=str(record.get('vesselIDs', '')),
+                                flag_state=record.get('flag'),
+                                gear_type=record.get('geartype'),
+                                source='gfw_ais'
+                            ))
+
+                    print(f"[FISHING] Got {len(fishing_records)} records for this period")
+
+                elif response.status_code == 401:
+                    raise RealDataError(
+                        "GFW API key is invalid or expired.\n"
+                        f"Response: {response.text[:300]}"
+                    )
+                elif response.status_code == 403:
+                    raise RealDataError(
+                        "GFW API access denied. Your API key may not have access to this data.\n"
+                        f"Response: {response.text[:300]}"
+                    )
+                elif response.status_code == 422:
+                    print(f"[FISHING] Validation error: {response.text[:200]}")
+                    # Try with a different endpoint or parameters
+                else:
+                    print(f"[FISHING] API error {response.status_code}: {response.text[:200]}")
+
+            except requests.exceptions.Timeout:
+                print(f"[FISHING] Timeout for {chunk_start_str} to {chunk_end_str}, continuing...")
+            except Exception as e:
+                print(f"[FISHING] Error: {e}")
+
+            chunk_start = chunk_end + timedelta(days=1)
+
+        if all_events:
+            print(f"[FISHING] SUCCESS: Got {len(all_events)} real fishing events from GFW")
+            self.data_sources_used.append('gfw_ais')
+            return all_events
+        else:
+            raise RealDataError(
+                "No fishing data retrieved from GFW API.\n"
+                "This may be because there's little fishing activity in this region,\n"
+                "or the API response format has changed."
             )
-
-            if response.status_code == 200:
-                data = response.json()
-                entries = data.get('entries', [])
-
-                events = []
-                for entry in entries:
-                    events.append(RealFishingEvent(
-                        date=entry.get('date', ''),
-                        lat=entry.get('lat', 0),
-                        lon=entry.get('lon', 0),
-                        fishing_hours=entry.get('hours', 0),
-                        vessel_id=entry.get('vesselId'),
-                        flag_state=entry.get('flag'),
-                        gear_type=entry.get('geartype'),
-                        source='gfw_ais'
-                    ))
-
-                print(f"[FISHING] SUCCESS: Got {len(events)} real fishing events from GFW")
-                self.data_sources_used.append('gfw_ais')
-                return events
-
-            elif response.status_code == 401:
-                raise RealDataError("GFW API key is invalid. Please check your API key.")
-            elif response.status_code == 403:
-                raise RealDataError("GFW API access denied. Your API key may not have access to this data.")
-            else:
-                raise RealDataError(f"GFW API error: {response.status_code} - {response.text[:200]}")
-
-        except requests.exceptions.Timeout:
-            raise RealDataError("GFW API timed out. Please try again later.")
-        except RealDataError:
-            raise
-        except Exception as e:
-            raise RealDataError(f"GFW API error: {e}")
 
     def build_real_training_dataset(
         self,

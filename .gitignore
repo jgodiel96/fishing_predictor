@@ -19,6 +19,7 @@ build/
 data/cache/
 data/historical/
 data/real_only/
+data/copernicus/
 
 # Output generado
 output/*.html

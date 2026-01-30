@@ -31,6 +31,13 @@ from data.fetchers.tide_fetcher import TideFetcher, TideData
 from data.data_config import DataConfig
 from domain import HOTSPOTS, SPECIES, STUDY_AREA
 
+# Importar fetcher de SSS/SLA si está disponible
+try:
+    from data.fetchers.copernicus_physics_fetcher import CopernicusPhysicsFetcher
+    HAS_PHYSICS_FETCHER = True
+except ImportError:
+    HAS_PHYSICS_FETCHER = False
+
 
 class HourlyPredictionGenerator:
     """
@@ -75,6 +82,14 @@ class HourlyPredictionGenerator:
         self.tide_fetcher = TideFetcher()
         self.db_path = DataConfig.PROCESSED_DIR / "hourly_predictions.db"
         self._init_database()
+
+        # Inicializar fetcher de física oceánica si está disponible
+        self.physics_fetcher = None
+        if HAS_PHYSICS_FETCHER:
+            try:
+                self.physics_fetcher = CopernicusPhysicsFetcher(verbose=False)
+            except Exception:
+                pass
 
     def _init_database(self):
         """Inicializa la base de datos de predicciones horarias."""
@@ -282,6 +297,21 @@ class HourlyPredictionGenerator:
         sst = self._get_sst_for_date(date, lat, lon)
         sst_score = self._calculate_sst_score(sst)
 
+        # Obtener SSS y SLA si están disponibles (Plan V3)
+        sss = None
+        sla = None
+        sss_score = 0.5  # Neutral si no hay datos
+        sla_score = 0.5
+
+        if self.physics_fetcher:
+            sss = self.physics_fetcher.get_sss_for_location(date, lat, lon)
+            sla = self.physics_fetcher.get_sla_for_location(date, lat, lon)
+
+            if sss is not None:
+                sss_score = self.physics_fetcher.calculate_sss_score(sss)
+            if sla is not None:
+                sla_score = self.physics_fetcher.calculate_sla_score(sla)
+
         # Score de hotspot (constante para la ubicación)
         hotspot_score, hotspot_name = self._calculate_hotspot_score(lat, lon)
 
@@ -296,23 +326,46 @@ class HourlyPredictionGenerator:
 
             # Score total ponderado
             # Pesos basados en literatura V2:
-            # - Mareas: 35% (muy importante para costa)
-            # - Hora: 25% (alba/ocaso críticos)
-            # - SST: 20% (condiciona presencia de peces)
-            # - Hotspot: 20% (zonas históricamente buenas)
-            total_score = (
-                tide.fishing_score * 0.35 +
-                hour_score * 0.25 +
-                sst_score * 0.20 +
-                hotspot_score * 0.20
-            ) * 100  # Escala 0-100
+            # Si hay SSS/SLA disponibles, redistribuir pesos
+            if sss is not None or sla is not None:
+                # Pesos con física oceánica completa
+                # - Mareas: 30%
+                # - Hora: 20%
+                # - SST: 15%
+                # - SSS: 15% (variable #1 en papers)
+                # - SLA: 10% (variable #2 en papers)
+                # - Hotspot: 10%
+                total_score = (
+                    tide.fishing_score * 0.30 +
+                    hour_score * 0.20 +
+                    sst_score * 0.15 +
+                    sss_score * 0.15 +
+                    sla_score * 0.10 +
+                    hotspot_score * 0.10
+                ) * 100
+            else:
+                # Pesos sin física oceánica (original)
+                # - Mareas: 35% (muy importante para costa)
+                # - Hora: 25% (alba/ocaso críticos)
+                # - SST: 20% (condiciona presencia de peces)
+                # - Hotspot: 20% (zonas históricamente buenas)
+                total_score = (
+                    tide.fishing_score * 0.35 +
+                    hour_score * 0.25 +
+                    sst_score * 0.20 +
+                    hotspot_score * 0.20
+                ) * 100  # Escala 0-100
 
             # Confianza basada en disponibilidad de datos
-            confidence = 0.7  # Base
+            confidence = 0.6  # Base
             if sst is not None:
-                confidence += 0.15
+                confidence += 0.10
+            if sss is not None:
+                confidence += 0.10
+            if sla is not None:
+                confidence += 0.10
             if hotspot_score > 0.5:
-                confidence += 0.15
+                confidence += 0.10
 
             predictions.append({
                 'date': date,
@@ -326,6 +379,8 @@ class HourlyPredictionGenerator:
                 'tide_score': round(tide.fishing_score * 100, 1),
                 'hour_score': round(hour_score * 100, 1),
                 'sst_score': round(sst_score * 100, 1),
+                'sss_score': round(sss_score * 100, 1) if sss is not None else None,
+                'sla_score': round(sla_score * 100, 1) if sla is not None else None,
                 'hotspot_score': round(hotspot_score * 100, 1),
 
                 # Score final
@@ -339,8 +394,10 @@ class HourlyPredictionGenerator:
                 'hours_to_high': tide.hours_to_high,
                 'hours_to_low': tide.hours_to_low,
 
-                # SST
+                # Datos oceanográficos
                 'sst': sst,
+                'sss': sss,
+                'sla': sla,
             })
 
         return predictions

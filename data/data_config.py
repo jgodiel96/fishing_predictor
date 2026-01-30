@@ -59,6 +59,14 @@ class DataConfig:
     RAW_SST_EARTHDATA = RAW_SST_DIR / "earthdata"  # NASA MUR SST (high-res)
     RAW_SST_COPERNICUS = RAW_SST_DIR / "copernicus"  # Copernicus Marine
 
+    # SSS (Salinity) from Copernicus - Variable #1 según papers V2
+    RAW_SSS_DIR = RAW_DIR / "sss"
+    RAW_SSS_COPERNICUS = RAW_SSS_DIR / "copernicus"
+
+    # SLA (Sea Level Anomaly) from Copernicus - Variable #2 según papers V2
+    RAW_SLA_DIR = RAW_DIR / "sla"
+    RAW_SLA_COPERNICUS = RAW_SLA_DIR / "copernicus"
+
     # User-submitted sightings (append-only)
     RAW_USER_SIGHTINGS = RAW_DIR / "user_sightings" / "sightings.jsonl"
 

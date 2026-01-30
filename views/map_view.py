@@ -627,6 +627,362 @@ class MapView:
             ''')
         return ''.join(rows)
 
+    def add_hourly_panel(self, hourly_data: Dict):
+        """
+        Add hourly predictions panel with tide chart and best hours.
+
+        Args:
+            hourly_data: Dict with keys:
+                - date: str (YYYY-MM-DD)
+                - location_name: str
+                - predictions: List[Dict] (24 hourly predictions)
+                - tide_extremes: List[Dict] (high/low tides)
+                - best_hours: List[Dict] (top 5 hours)
+        """
+        if not self.map or not hourly_data:
+            return
+
+        predictions = hourly_data.get('predictions', [])
+        tide_extremes = hourly_data.get('tide_extremes', [])
+        best_hours = hourly_data.get('best_hours', [])
+        date = hourly_data.get('date', 'N/A')
+        location = hourly_data.get('location_name', 'Ubicacion')
+
+        # Prepare data for charts
+        hours_labels = json.dumps([f"{h:02d}:00" for h in range(24)])
+        total_scores = json.dumps([p.get('total_score', 0) for p in predictions])
+        tide_heights = json.dumps([p.get('tide_height', 0) for p in predictions])
+        tide_scores = json.dumps([p.get('tide_score', 0) for p in predictions])
+        hour_scores = json.dumps([p.get('hour_score', 0) for p in predictions])
+
+        # Best hours table
+        best_hours_rows = self._build_best_hours_rows(best_hours)
+        tide_extremes_html = self._build_tide_extremes_html(tide_extremes)
+
+        hourly_html = f'''
+        <!-- Hourly Predictions Panel -->
+        <div id="hourly-panel" style="
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(255,255,255,0.97);
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            font-family: Arial, sans-serif;
+            width: 380px;
+            max-height: 85vh;
+            overflow-y: auto;
+        ">
+            <!-- Header -->
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <div>
+                    <h3 style="margin:0;color:#0d47a1;">Prediccion Horaria</h3>
+                    <small style="color:#666;">{date} - {location}</small>
+                </div>
+                <button onclick="toggleHourlyPanel()" style="border:none;background:none;cursor:pointer;font-size:18px;">_</button>
+            </div>
+
+            <!-- Tide Info -->
+            <div style="background:#e3f2fd;padding:10px;border-radius:8px;margin-bottom:12px;">
+                <b style="color:#1565c0;">Mareas del Dia</b>
+                <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;">
+                    {tide_extremes_html}
+                </div>
+            </div>
+
+            <!-- Hour Slider -->
+            <div style="margin-bottom:12px;">
+                <label style="font-size:12px;color:#666;">Seleccionar hora:</label>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <input type="range" id="hour-slider" min="0" max="23" value="6"
+                        style="flex:1;" oninput="updateHourDisplay(this.value)">
+                    <span id="hour-display" style="font-weight:bold;min-width:50px;">06:00</span>
+                </div>
+                <div id="hour-details" style="margin-top:8px;padding:10px;background:#f5f5f5;border-radius:5px;">
+                    <div style="display:flex;justify-content:space-between;">
+                        <span>Score Total:</span>
+                        <b id="detail-score" style="color:#0d47a1;">--</b>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;">
+                        <span>Marea:</span>
+                        <span id="detail-tide">--</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;">
+                        <span>Altura:</span>
+                        <span id="detail-height">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Tabs -->
+            <div style="display:flex;margin-bottom:10px;border-bottom:2px solid #eee;">
+                <button class="hourly-tab-btn active" onclick="showHourlyTab('scores')" style="flex:1;padding:8px;border:none;background:none;cursor:pointer;font-weight:bold;">Scores</button>
+                <button class="hourly-tab-btn" onclick="showHourlyTab('tides')" style="flex:1;padding:8px;border:none;background:none;cursor:pointer;">Mareas</button>
+                <button class="hourly-tab-btn" onclick="showHourlyTab('best')" style="flex:1;padding:8px;border:none;background:none;cursor:pointer;">Mejores</button>
+            </div>
+
+            <!-- Scores Chart -->
+            <div id="hourly-tab-scores" class="hourly-tab-content">
+                <canvas id="hourlyScoresChart" height="160"></canvas>
+            </div>
+
+            <!-- Tides Chart -->
+            <div id="hourly-tab-tides" class="hourly-tab-content" style="display:none;">
+                <canvas id="hourlyTidesChart" height="160"></canvas>
+            </div>
+
+            <!-- Best Hours Tab -->
+            <div id="hourly-tab-best" class="hourly-tab-content" style="display:none;">
+                <table style="width:100%;font-size:12px;border-collapse:collapse;">
+                    <tr style="background:#e3f2fd;">
+                        <th style="padding:8px;text-align:left;">Hora</th>
+                        <th style="padding:8px;">Score</th>
+                        <th style="padding:8px;">Marea</th>
+                        <th style="padding:8px;">Razon</th>
+                    </tr>
+                    {best_hours_rows}
+                </table>
+            </div>
+
+            <!-- Legend -->
+            <div style="margin-top:12px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#666;">
+                <b>Pesos:</b> Marea 35% | Hora 25% | SST 20% | Zona 20%
+            </div>
+        </div>
+
+        <!-- Minimized Button -->
+        <div id="hourly-btn" style="
+            display: none;
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: #0d47a1;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        " onclick="toggleHourlyPanel()">
+            Prediccion Horaria
+        </div>
+
+        <style>
+            .hourly-tab-btn.active {{
+                color: #0d47a1;
+                border-bottom: 2px solid #0d47a1;
+            }}
+            #hourly-panel::-webkit-scrollbar {{
+                width: 6px;
+            }}
+            #hourly-panel::-webkit-scrollbar-thumb {{
+                background: #ccc;
+                border-radius: 3px;
+            }}
+        </style>
+
+        <script>
+            // Hourly prediction data
+            const hourlyPredictions = {json.dumps(predictions)};
+            const hoursLabels = {hours_labels};
+            const totalScores = {total_scores};
+            const tideHeights = {tide_heights};
+            const tideScores = {tide_scores};
+            const hourScores = {hour_scores};
+
+            // Initialize hourly charts
+            setTimeout(initHourlyCharts, 600);
+
+            function initHourlyCharts() {{
+                // Scores chart
+                const scoresCtx = document.getElementById('hourlyScoresChart');
+                if (scoresCtx && !scoresCtx.chart) {{
+                    scoresCtx.chart = new Chart(scoresCtx, {{
+                        type: 'bar',
+                        data: {{
+                            labels: hoursLabels,
+                            datasets: [{{
+                                label: 'Score Total',
+                                data: totalScores,
+                                backgroundColor: totalScores.map(s =>
+                                    s >= 75 ? 'rgba(76, 175, 80, 0.7)' :
+                                    s >= 60 ? 'rgba(255, 193, 7, 0.7)' :
+                                    'rgba(244, 67, 54, 0.5)'
+                                ),
+                                borderColor: totalScores.map(s =>
+                                    s >= 75 ? 'rgba(76, 175, 80, 1)' :
+                                    s >= 60 ? 'rgba(255, 193, 7, 1)' :
+                                    'rgba(244, 67, 54, 1)'
+                                ),
+                                borderWidth: 1
+                            }}]
+                        }},
+                        options: {{
+                            responsive: true,
+                            plugins: {{
+                                legend: {{ display: false }},
+                                tooltip: {{
+                                    callbacks: {{
+                                        afterBody: function(context) {{
+                                            const i = context[0].dataIndex;
+                                            const p = hourlyPredictions[i];
+                                            return [
+                                                'Marea: ' + (p.tide_phase_es || p.tide_phase),
+                                                'Altura: ' + p.tide_height + 'm'
+                                            ];
+                                        }}
+                                    }}
+                                }}
+                            }},
+                            scales: {{
+                                y: {{ beginAtZero: true, max: 100, title: {{ display: true, text: 'Score' }} }}
+                            }},
+                            onClick: function(e, elements) {{
+                                if (elements.length > 0) {{
+                                    const hour = elements[0].index;
+                                    document.getElementById('hour-slider').value = hour;
+                                    updateHourDisplay(hour);
+                                }}
+                            }}
+                        }}
+                    }});
+                }}
+
+                // Tides chart
+                const tidesCtx = document.getElementById('hourlyTidesChart');
+                if (tidesCtx && !tidesCtx.chart) {{
+                    tidesCtx.chart = new Chart(tidesCtx, {{
+                        type: 'line',
+                        data: {{
+                            labels: hoursLabels,
+                            datasets: [{{
+                                label: 'Altura Marea (m)',
+                                data: tideHeights,
+                                borderColor: 'rgba(33, 150, 243, 1)',
+                                backgroundColor: 'rgba(33, 150, 243, 0.2)',
+                                fill: true,
+                                tension: 0.4,
+                                yAxisID: 'y'
+                            }}, {{
+                                label: 'Score Marea',
+                                data: tideScores,
+                                borderColor: 'rgba(76, 175, 80, 1)',
+                                borderWidth: 2,
+                                fill: false,
+                                tension: 0.3,
+                                yAxisID: 'y1'
+                            }}]
+                        }},
+                        options: {{
+                            responsive: true,
+                            plugins: {{
+                                legend: {{ position: 'bottom', labels: {{ boxWidth: 12, font: {{ size: 10 }} }} }}
+                            }},
+                            scales: {{
+                                y: {{ position: 'left', title: {{ display: true, text: 'Altura (m)' }} }},
+                                y1: {{ position: 'right', min: 0, max: 100, grid: {{ drawOnChartArea: false }}, title: {{ display: true, text: 'Score' }} }}
+                            }}
+                        }}
+                    }});
+                }}
+
+                // Initialize display
+                updateHourDisplay(6);
+            }}
+
+            function updateHourDisplay(hour) {{
+                hour = parseInt(hour);
+                document.getElementById('hour-display').textContent = String(hour).padStart(2, '0') + ':00';
+
+                const p = hourlyPredictions[hour];
+                if (p) {{
+                    document.getElementById('detail-score').textContent = p.total_score.toFixed(0) + '/100';
+                    document.getElementById('detail-tide').textContent = p.tide_phase_es || p.tide_phase;
+                    document.getElementById('detail-height').textContent = p.tide_height.toFixed(2) + 'm';
+
+                    // Update score color
+                    const scoreEl = document.getElementById('detail-score');
+                    if (p.total_score >= 75) scoreEl.style.color = '#4caf50';
+                    else if (p.total_score >= 60) scoreEl.style.color = '#ff9800';
+                    else scoreEl.style.color = '#f44336';
+                }}
+            }}
+
+            function showHourlyTab(tabName) {{
+                document.querySelectorAll('.hourly-tab-content').forEach(el => el.style.display = 'none');
+                document.querySelectorAll('.hourly-tab-btn').forEach(el => el.classList.remove('active'));
+                document.getElementById('hourly-tab-' + tabName).style.display = 'block';
+                event.target.classList.add('active');
+            }}
+
+            function toggleHourlyPanel() {{
+                const panel = document.getElementById('hourly-panel');
+                const btn = document.getElementById('hourly-btn');
+                if (panel.style.display === 'none') {{
+                    panel.style.display = 'block';
+                    btn.style.display = 'none';
+                }} else {{
+                    panel.style.display = 'none';
+                    btn.style.display = 'block';
+                }}
+            }}
+        </script>
+        '''
+
+        self.map.get_root().html.add_child(folium.Element(hourly_html))
+
+    def _build_best_hours_rows(self, best_hours: List[Dict]) -> str:
+        """Build HTML rows for best fishing hours table."""
+        rows = []
+        for i, h in enumerate(best_hours[:5]):
+            score = h.get('total_score', 0)
+            color = '#4caf50' if score >= 75 else '#ff9800' if score >= 60 else '#f44336'
+            medal = ['🥇', '🥈', '🥉', '4.', '5.'][i]
+
+            rows.append(f'''
+                <tr style="border-bottom:1px solid #eee;">
+                    <td style="padding:8px;">{medal} {h.get('time', '--')}</td>
+                    <td style="padding:8px;text-align:center;color:{color};font-weight:bold;">{score:.0f}</td>
+                    <td style="padding:8px;text-align:center;font-size:11px;">{h.get('tide_phase_es', h.get('tide_phase', '--'))}</td>
+                    <td style="padding:8px;font-size:10px;color:#666;">{self._get_hour_reason(h)}</td>
+                </tr>
+            ''')
+        return ''.join(rows)
+
+    def _build_tide_extremes_html(self, extremes: List[Dict]) -> str:
+        """Build HTML for tide extremes display."""
+        html_parts = []
+        for e in extremes:
+            icon = '🔺' if e.get('type') == 'high' else '🔻'
+            label = e.get('type_es', 'Pleamar' if e.get('type') == 'high' else 'Bajamar')
+            html_parts.append(f'''
+                <div style="background:white;padding:5px 10px;border-radius:5px;font-size:12px;">
+                    {icon} <b>{e.get('time', '--')}</b> {label} ({e.get('height', 0):.2f}m)
+                </div>
+            ''')
+        return ''.join(html_parts)
+
+    def _get_hour_reason(self, hour_data: Dict) -> str:
+        """Generate reason text for why this hour is good."""
+        reasons = []
+
+        tide_score = hour_data.get('tide_score', 0)
+        hour_score = hour_data.get('hour_score', 0)
+
+        if tide_score >= 80:
+            reasons.append('Marea optima')
+        if hour_score >= 90:
+            reasons.append('Alba/Ocaso')
+        elif hour_score >= 70:
+            reasons.append('Buena hora')
+
+        if not reasons:
+            reasons.append('Condiciones moderadas')
+
+        return ' + '.join(reasons)
+
     def finalize(self) -> folium.Map:
         """Add layer control and return map."""
         if self.map:

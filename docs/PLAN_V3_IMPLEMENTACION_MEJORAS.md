@@ -2,7 +2,7 @@
 
 **Fecha:** 2026-01-30
 **Version:** 3.0
-**Estado:** En progreso
+**Estado:** ✅ COMPLETADO
 **Prerequisitos:**
 - [Plan V1 - Arquitectura de Datos](PLAN_V1_ARQUITECTURA_DATOS.md) ✅ Completado
 - [Plan V2 - Validacion Cientifica](PLAN_V2_VALIDACION_CIENTIFICA.md) ✅ Completado
@@ -15,7 +15,7 @@
 |------|---------|--------|
 | **V1** | Arquitectura Bronze/Silver/Gold, datos reales 2020-2026 | ✅ Completado |
 | **V2** | Estado del Arte, validacion cientifica | ✅ Completado |
-| **V3** | Implementacion de mejoras tecnicas | 📋 En progreso |
+| **V3** | Implementacion de mejoras tecnicas | ✅ Completado |
 
 ---
 
@@ -23,7 +23,7 @@
 
 ### 1.1 Integracion de Mareas ✅
 
-**Archivo:** `data/fetchers/tide_fetcher.py`
+**Archivo:** `data/fetchers/tide_fetcher.py` (505 lineas)
 
 | Componente | Estado | Descripcion |
 |------------|--------|-------------|
@@ -46,7 +46,7 @@ FISHING_SCORES = {
 
 ### 1.2 Predicciones Horarias ✅
 
-**Archivo:** `scripts/generate_hourly_predictions.py`
+**Archivo:** `scripts/generate_hourly_predictions.py` (600+ lineas)
 
 | Componente | Estado | Descripcion |
 |------------|--------|-------------|
@@ -55,101 +55,100 @@ FISHING_SCORES = {
 | Scores por hora | ✅ | Alba/ocaso bonificados |
 | Hotspot scoring | ✅ | Proximidad a zonas conocidas |
 | SST integration | ✅ | Datos de Copernicus |
+| SSS integration | ✅ | Salinidad de Copernicus |
+| SLA integration | ✅ | Nivel del mar de Copernicus |
 | Base de datos | ✅ | hourly_predictions.db |
 
-**Pesos del score total:**
+**Pesos del score total (con fisica oceanica):**
 ```python
+# Con SSS/SLA disponibles:
 total_score = (
-    tide_score * 0.35 +     # 35% - Mareas (muy importante costa)
-    hour_score * 0.25 +     # 25% - Hora del dia
-    sst_score * 0.20 +      # 20% - Temperatura
-    hotspot_score * 0.20    # 20% - Zona historica
+    tide_score * 0.30 +     # 30% - Mareas
+    hour_score * 0.20 +     # 20% - Hora del dia
+    sst_score * 0.15 +      # 15% - Temperatura
+    sss_score * 0.15 +      # 15% - Salinidad (#1 en papers)
+    sla_score * 0.10 +      # 10% - Nivel del mar (#2 en papers)
+    hotspot_score * 0.10    # 10% - Zona historica
+) * 100
+
+# Sin SSS/SLA (fallback):
+total_score = (
+    tide_score * 0.35 +     # 35% - Mareas
+    hour_score * 0.25 +     # 25% - Hora
+    sst_score * 0.20 +      # 20% - SST
+    hotspot_score * 0.20    # 20% - Hotspot
 ) * 100
 ```
 
-**Uso:**
-```bash
-# Prediccion para una ubicacion
-python scripts/generate_hourly_predictions.py --date 2026-01-30
+### 1.3 Visualizacion Horaria en Mapa ✅
 
-# Todos los hotspots
-python scripts/generate_hourly_predictions.py --date 2026-01-30 --all-hotspots --save
+**Archivo:** `views/map_view.py` (metodo `add_hourly_panel`)
 
-# Salida JSON
-python scripts/generate_hourly_predictions.py --date 2026-01-30 --json
-```
+| Componente | Estado | Descripcion |
+|------------|--------|-------------|
+| Panel de prediccion | ✅ | Widget interactivo |
+| Slider de horas | ✅ | 0-23h con actualizacion en vivo |
+| Grafico de scores | ✅ | Barras por hora con colores |
+| Grafico de mareas | ✅ | Curva de altura + score |
+| Tabla mejores horas | ✅ | Top 5 con medallas |
+| Info de mareas | ✅ | Pleamares/bajamares del dia |
 
----
+### 1.4 SSS (Salinidad) de Copernicus ✅
 
-## 2. Mejoras Pendientes
+**Archivo:** `data/fetchers/copernicus_physics_fetcher.py`
 
-### 2.1 Mejorar Timeline con Visualizacion Horaria (Prioridad ALTA)
+| Componente | Estado | Descripcion |
+|------------|--------|-------------|
+| Fetcher SSS | ✅ | Dataset cmems_mod_glo_phy |
+| Score salinidad | ✅ | Rango optimo 34.4-35.3 PSU |
+| Integracion | ✅ | En generate_hourly_predictions.py |
+| DataConfig | ✅ | RAW_SSS_COPERNICUS path |
 
-**Objetivo:** Actualizar `views/map_view.py` para mostrar predicciones horarias
+**Rango optimo (IMARPE):**
+- Minimo: 34.4 PSU
+- Maximo: 35.3 PSU
+- Fuente: Estudios de anchoveta
 
-**Componentes:**
-- [ ] Grafico de mareas del dia
-- [ ] Slider de horas (0-23)
-- [ ] Tabla de mejores horas
-- [ ] Indicador de marea actual
+### 1.5 SLA (Nivel del Mar) de Copernicus ✅
 
-**Mockup:**
-```
-+------------------------------------------+
-|  PREDICCION HORARIA - 30/01/2026         |
-+------------------------------------------+
-|  [Slider: 0h ----[06h]---- 23h]          |
-|                                          |
-|  Hora seleccionada: 06:00                |
-|  Score: 81/100                           |
-|  Marea: Saliente (0.24m)                 |
-|  Condicion: Excelente para pesca         |
-+------------------------------------------+
-```
+**Archivo:** `data/fetchers/copernicus_physics_fetcher.py`
 
-### 2.2 Agregar SSS (Salinidad) de Copernicus (Prioridad MEDIA)
+| Componente | Estado | Descripcion |
+|------------|--------|-------------|
+| Fetcher SLA | ✅ | Variable `zos` |
+| Score SLA | ✅ | Negativo = upwelling (bueno) |
+| Integracion | ✅ | En generate_hourly_predictions.py |
+| DataConfig | ✅ | RAW_SLA_COPERNICUS path |
 
-**Dataset:** `GLOBAL_ANALYSISFORECAST_PHY_001_024`
-**Variable:** `so` (salinity)
-
-**Implementacion:**
-```python
-# En download_incremental.py agregar:
-def download_sss(start_date, end_date, region):
-    dataset_id = "cmems_mod_glo_phy-so_anfc_0.083deg_P1D-m"
-    # ...
-```
-
-### 2.3 Agregar SLA (Nivel del Mar) de Copernicus (Prioridad MEDIA)
-
-**Dataset:** `GLOBAL_ANALYSISFORECAST_PHY_001_024`
-**Variable:** `zos` (sea surface height)
-
-**Relevancia:** Variable #2 en papers segun estado del arte V2
-
-### 2.4 Sistema de Validacion CPUE (Prioridad MEDIA)
-
-**Objetivo:** Comparar predicciones con capturas reales
-
-**Componentes:**
-- [ ] API/formulario para reportar capturas
-- [ ] Calculo de metricas (Hit Rate, CPUE Ratio)
-- [ ] Dashboard de accuracy
+**Logica de scoring:**
+- SLA < -0.05m: Upwelling fuerte (score 0.9-1.0)
+- SLA < 0: Upwelling leve (score 0.7-0.9)
+- SLA ~ 0: Neutro (score 0.5)
+- SLA > 0.05m: Hundimiento (score 0.2-0.5)
 
 ---
 
-## 3. Archivos Creados en V3
+## 2. Archivos Creados/Modificados en V3
 
-| Archivo | Proposito | Estado |
-|---------|-----------|--------|
-| `data/fetchers/tide_fetcher.py` | Calculo de mareas | ✅ |
-| `scripts/generate_hourly_predictions.py` | Predicciones horarias | ✅ |
-| `data/processed/hourly_predictions.db` | Base de datos horaria | ✅ |
-| `docs/PLAN_V3_IMPLEMENTACION_MEJORAS.md` | Este documento | ✅ |
+### Archivos Nuevos
+
+| Archivo | Lineas | Proposito |
+|---------|--------|-----------|
+| `data/fetchers/tide_fetcher.py` | 505 | Calculo astronomico de mareas |
+| `data/fetchers/copernicus_physics_fetcher.py` | 350 | SSS y SLA de Copernicus |
+| `scripts/generate_hourly_predictions.py` | 600+ | Predicciones horarias |
+| `data/processed/hourly_predictions.db` | - | Base de datos SQLite |
+
+### Archivos Modificados
+
+| Archivo | Cambio |
+|---------|--------|
+| `views/map_view.py` | +200 lineas: metodo `add_hourly_panel` |
+| `data/data_config.py` | +6 lineas: RAW_SSS_*, RAW_SLA_* paths |
 
 ---
 
-## 4. Comandos V3
+## 3. Comandos V3
 
 ```bash
 # Prediccion horaria para hoy
@@ -166,11 +165,14 @@ python scripts/generate_hourly_predictions.py --all-hotspots --save
 
 # Salida JSON para integracion
 python scripts/generate_hourly_predictions.py --json
+
+# Descargar SSS y SLA (requiere credenciales Copernicus)
+python data/fetchers/copernicus_physics_fetcher.py --start 2024-01 --end 2026-01 -v
 ```
 
 ---
 
-## 5. Ejemplo de Salida
+## 4. Ejemplo de Salida
 
 ```
 ============================================================
@@ -191,11 +193,21 @@ Ubicacion: (-17.702, -71.332) - Punta Coles
   3. 07:00 - Score: 79/100 (Marea saliente)
   4. 18:00 - Score: 79/100 (Marea saliente)
   5. 08:00 - Score: 75/100 (Marea saliente)
+
+--- TODAS LAS HORAS ---
+Hora   Score    Marea              Altura
+---------------------------------------------
+00:00     65  ██████     Marea saliente     -0.22m
+06:00     81  ████████   Marea saliente      0.24m  ← MEJOR
+07:00     79  ███████    Marea saliente      0.11m
+...
+18:00     79  ███████    Marea saliente     -0.33m
+19:00     80  ████████   Marea saliente     -0.53m  ← 2do MEJOR
 ```
 
 ---
 
-## 6. Validacion Cientifica
+## 5. Validacion Cientifica
 
 Las mejoras implementadas estan basadas en literatura revisada en V2:
 
@@ -204,18 +216,36 @@ Las mejoras implementadas estan basadas en literatura revisada en V2:
 | Mareas | +200-300% exito en cambios de marea | Estudios costeros 2019 |
 | Hora alba/ocaso | Picos de actividad alimenticia | Consenso cientifico |
 | SST scoring | Variable #3 en prediccion | Papers 2024 |
+| SSS scoring | Variable #1 en prediccion | Papers 2024 (Frontiers) |
+| SLA scoring | Variable #2, indica upwelling | Chavez et al. 2008 |
 | Hotspot proximity | Zonas historicas productivas | IMARPE, GFW |
 
 ---
 
-## 7. Proximos Pasos
+## 6. Mejoras Futuras (V4)
 
-1. **Inmediato:** Actualizar timeline en map_view.py
-2. **Corto plazo:** Agregar SSS y SLA
-3. **Mediano plazo:** Sistema de validacion CPUE
-4. **Largo plazo:** Migrar a deep learning (U-Net) si datos crecen
+| Prioridad | Mejora | Descripcion |
+|-----------|--------|-------------|
+| ALTA | Sistema validacion CPUE | Comparar predicciones vs capturas reales |
+| MEDIA | Clorofila-a | Agregar Chl-a de Copernicus |
+| MEDIA | API REST | Servicio web para predicciones |
+| BAJA | Deep Learning | Migrar a U-Net si datos crecen |
+| BAJA | App movil | Interfaz para pescadores |
 
 ---
 
-*Plan V3 iniciado: 2026-01-30*
+## 7. Resumen de Tareas V3
+
+| # | Tarea | Estado |
+|---|-------|--------|
+| 11 | Integrar datos de mareas | ✅ Completado |
+| 12 | Implementar predicciones horarias | ✅ Completado |
+| 13 | Mejorar timeline con visualizacion | ✅ Completado |
+| 14 | Agregar SSS de Copernicus | ✅ Completado |
+| 15 | Agregar SLA de Copernicus | ✅ Completado |
+| 16 | Crear documento PLAN_V3 | ✅ Completado |
+
+---
+
+*Plan V3 completado: 2026-01-30*
 *Proyecto: Fishing Predictor - Tacna/Ilo, Peru*

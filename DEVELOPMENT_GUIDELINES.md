@@ -1,7 +1,7 @@
 # Development Guidelines - Fishing Predictor
 
-**Version**: 2.0
-**Fecha**: 2026-01-28
+**Version**: 3.0
+**Fecha**: 2026-01-30
 
 Este documento establece los lineamientos tecnicos y buenas practicas para el desarrollo del sistema de prediccion de pesca.
 
@@ -9,7 +9,7 @@ Este documento establece los lineamientos tecnicos y buenas practicas para el de
 
 ## 1. Arquitectura del Proyecto
 
-### 1.1 Patron MVC
+### 1.1 Patron MVC + Data Lakehouse
 
 ```
 fishing_predictor/
@@ -17,7 +17,10 @@ fishing_predictor/
 ├── views/           # Renderizado (mapas, reportes)
 ├── controllers/     # Orquestacion de flujo
 ├── core/            # Servicios de infraestructura
-├── data/            # Acceso a datos
+├── data/            # Acceso y gestion de datos
+│   ├── raw/         # Bronze Layer (inmutable)
+│   ├── processed/   # Silver Layer (regenerable)
+│   └── analytics/   # Gold Layer (ML-ready)
 └── domain.py        # Constantes de dominio (CENTRAL)
 ```
 
@@ -26,6 +29,7 @@ fishing_predictor/
 - **Views**: Solo renderizado. Sin logica de negocio.
 - **Controllers**: Orquestacion. Minima logica.
 - **Core**: Servicios reutilizables (fetchers, parsers).
+- **Data**: Gestion de capas Bronze/Silver/Gold.
 
 ### 1.2 Modulo Central: `domain.py`
 
@@ -39,20 +43,135 @@ from domain import HOTSPOTS, SPECIES, THRESHOLDS
 HOTSPOTS = [(-17.70, -71.33, "Punta Coles", 1.3), ...]  # NO
 ```
 
+### 1.3 Configuracion de Datos: `data/data_config.py`
+
+**TODOS los paths de datos DEBEN usar DataConfig:**
+
+```python
+# CORRECTO - Usar DataConfig
+from data.data_config import DataConfig
+
+db_path = DataConfig.FISHING_DB
+raw_dir = DataConfig.RAW_GFW
+
+# INCORRECTO - Paths hardcodeados
+db_path = "data/processed/fishing.db"  # NO
+```
+
 ---
 
-## 2. Estructuras de Datos Eficientes
+## 2. Arquitectura de Datos Bronze/Silver/Gold
 
-### 2.1 Preferir NamedTuple sobre Dict
+### 2.1 Bronze Layer (raw/) - INMUTABLE
+
+```
+data/raw/
+├── gfw/                    # Global Fishing Watch
+│   ├── 2020-01.parquet
+│   ├── 2020-02.parquet
+│   ├── ...
+│   ├── 2026-01.parquet
+│   └── _manifest.json
+├── open_meteo/             # Condiciones marinas
+│   ├── YYYY-MM.parquet
+│   └── _manifest.json
+└── sst/
+    └── copernicus/         # SST satelital
+        ├── YYYY-MM.parquet
+        └── _manifest.json
+```
+
+**Reglas Bronze:**
+1. **NUNCA** modificar archivos existentes
+2. Solo **AGREGAR** nuevos archivos (nuevos meses)
+3. Cada archivo = 1 mes de datos
+4. Naming: `YYYY-MM.parquet`
+5. Manifest obligatorio por fuente
+6. Checksum SHA256 para verificacion
+
+```python
+# CORRECTO - Agregar nuevo mes
+output_path = DataConfig.RAW_GFW / "2026-02.parquet"
+df.to_parquet(output_path)
+manifest.add_download(filename="2026-02.parquet", ...)
+
+# INCORRECTO - Modificar archivo existente
+existing_path = DataConfig.RAW_GFW / "2026-01.parquet"
+df.to_parquet(existing_path)  # NO - viola inmutabilidad
+```
+
+### 2.2 Silver Layer (processed/) - REGENERABLE
+
+```
+data/processed/
+├── fishing_consolidated.db     # Toda la pesca unificada
+├── marine_consolidated.db      # Condiciones + SST
+├── training_features.parquet   # Features para ML
+└── _consolidation_log.json     # Registro de consolidacion
+```
+
+**Reglas Silver:**
+1. Puede regenerarse desde Bronze
+2. Script de consolidacion idempotente
+3. Deduplicacion automatica
+4. Log de cada consolidacion
+
+```python
+# Regenerar Silver desde Bronze
+from data.consolidator import Consolidator
+consolidator = Consolidator()
+consolidator.consolidate_all()
+```
+
+### 2.3 Gold Layer (analytics/) - VERSIONADO
+
+```
+data/analytics/
+├── current/
+│   ├── training_dataset.parquet
+│   └── model_metadata.json
+└── versions/
+    ├── v20260115/
+    ├── v20260122/
+    └── v20260129/
+```
+
+**Reglas Gold:**
+1. Versionado por fecha
+2. Mantener ultimas 5 versiones
+3. Metadata de features usados
+4. Reproducibilidad garantizada
+
+### 2.4 Manifests
+
+Cada fuente en Bronze tiene un `_manifest.json`:
+
+```json
+{
+  "source": "gfw",
+  "version": "1.0",
+  "downloads": [
+    {
+      "file": "2024-01.parquet",
+      "period": {"start": "2024-01-01", "end": "2024-01-31"},
+      "downloaded_at": "2026-01-29T10:30:00Z",
+      "records": 1527,
+      "checksum": "sha256:abc123...",
+      "api_response_code": 200
+    }
+  ]
+}
+```
+
+---
+
+## 3. Estructuras de Datos Eficientes
+
+### 3.1 Preferir NamedTuple sobre Dict
 
 ```python
 # INCORRECTO - Dict mutable, sin tipado
-BBOX = {
-    "north": -17.50,
-    "south": -18.25,
-    "west": -71.45,
-    "east": -70.55,
-}
+BBOX = {"north": -17.50, "south": -18.25, ...}
 
 # CORRECTO - NamedTuple inmutable, tipado
 class BoundingBox(NamedTuple):
@@ -64,134 +183,109 @@ class BoundingBox(NamedTuple):
 STUDY_AREA = BoundingBox(-17.50, -18.25, -71.45, -70.55)
 ```
 
-**Beneficios:**
-- Inmutabilidad (seguridad)
-- Acceso por atributo (`box.north` vs `box["north"]`)
-- Menor uso de memoria
-- Type hints automaticos
-
-### 2.2 Preferir Tuple sobre List para datos fijos
+### 3.2 Preferir Tuple sobre List para datos fijos
 
 ```python
-# INCORRECTO - Lista mutable para datos constantes
-FEATURE_NAMES = [
-    'sst', 'sst_anomaly', 'sst_optimal_score', ...
-]
+# INCORRECTO - Lista mutable
+FEATURE_NAMES = ['sst', 'sst_anomaly', ...]
 
 # CORRECTO - Tupla inmutable
-FEATURE_NAMES: Tuple[str, ...] = (
-    'sst', 'sst_anomaly', 'sst_optimal_score', ...
-)
+FEATURE_NAMES: Tuple[str, ...] = ('sst', 'sst_anomaly', ...)
 ```
 
-### 2.3 Preferir FrozenSet para colecciones de busqueda
+### 3.3 Preferir FrozenSet para colecciones de busqueda
 
 ```python
 # INCORRECTO - Set mutable
 VALID_SPECIES = {'Cabrilla', 'Corvina', 'Robalo'}
 
-# CORRECTO - FrozenSet inmutable y hasheable
+# CORRECTO - FrozenSet inmutable
 VALID_SPECIES: FrozenSet[str] = frozenset({'Cabrilla', 'Corvina', 'Robalo'})
 ```
 
-### 2.4 Usar Dataclass para estructuras con metodos
+---
+
+## 4. Manejo de Datos
+
+### 4.1 NO usar datos sinteticos
 
 ```python
-# CORRECTO - Dataclass cuando necesitas metodos
-@dataclass(frozen=True)
-class Species:
-    name: str
-    temp_min: float
-    temp_max: float
+# PROHIBIDO - Generacion de datos sinteticos
+def generate_synthetic_sst():
+    return np.random.normal(17.5, 2.0, size=1000)  # NO
 
-    def temp_score(self, sst: float) -> float:
-        """Calcula score de temperatura."""
-        if self.temp_min <= sst <= self.temp_max:
-            return 1.0
-        return 0.1
+# CORRECTO - Solo datos reales
+def fetch_real_sst():
+    return erddap_client.get_sst(STUDY_AREA)
+```
+
+### 4.2 Prioridad de fuentes de datos
+
+1. **Global Fishing Watch** - Actividad pesquera real (API)
+2. **Copernicus Marine** - SST satelital (API)
+3. **Open-Meteo ERA5** - Condiciones marinas (API)
+4. **IMARPE** - Datos historicos verificados (climatologia)
+
+### 4.3 Descargas Incrementales
+
+```python
+# CORRECTO - Usar download_incremental.py
+python scripts/download_incremental.py --source gfw --start 2026-01 --end 2026-02
+
+# El script:
+# 1. Verifica que meses ya existen
+# 2. Solo descarga meses faltantes
+# 3. Actualiza manifest con checksums
+# 4. NUNCA modifica datos existentes
+```
+
+### 4.4 Credenciales
+
+```python
+# CORRECTO - Usar .env y DataConfig
+from data.data_config import DataConfig
+
+gfw_key = DataConfig.get_gfw_api_key()
+copernicus_user = DataConfig.get_copernicus_credentials()
+
+# INCORRECTO - Hardcodear credenciales
+GFW_API_KEY = "abc123..."  # NO - nunca en codigo
 ```
 
 ---
 
-## 3. Evitar Variables Intermedias Innecesarias
+## 5. Convencion de Nombres
 
-### 3.1 Usar expresiones directas
+### 5.1 Archivos de datos
 
-```python
-# INCORRECTO - Variables intermedias innecesarias
-temp_list = []
-for species in SPECIES:
-    score = species.temp_score(sst)
-    temp_list.append(score)
-max_score = max(temp_list)
+```
+# Bronze layer
+YYYY-MM.parquet          # Datos mensuales
+_manifest.json           # Manifest de fuente
 
-# CORRECTO - Expresion directa
-max_score = max(sp.temp_score(sst) for sp in SPECIES)
+# Silver layer
+*_consolidated.db        # Base consolidada
+training_features.parquet
+
+# Gold layer
+training_dataset.parquet
+model_metadata.json
 ```
 
-### 3.2 Usar operador walrus cuando sea claro
-
-```python
-# INCORRECTO
-point = self._fetch_point(lat, lon)
-if point:
-    self.sampled_points.append(point)
-
-# CORRECTO (Python 3.8+)
-if point := self._fetch_point(lat, lon):
-    self.sampled_points.append(point)
-```
-
-### 3.3 Vectorizar con NumPy
-
-```python
-# INCORRECTO - Bucle Python
-distances = []
-for hotspot in HOTSPOTS:
-    d = haversine(lat, lon, hotspot.lat, hotspot.lon)
-    distances.append(d)
-min_dist = min(distances)
-
-# CORRECTO - Operacion vectorizada
-hotspot_coords = np.array([(h.lat, h.lon) for h in HOTSPOTS])
-distances = haversine_vectorized(lat, lon, hotspot_coords)
-min_dist = distances.min()
-```
-
----
-
-## 4. Convencion de Nombres
-
-### 4.1 Constantes
+### 5.2 Constantes
 
 ```python
 # Constantes de modulo - UPPER_SNAKE_CASE
 STUDY_AREA = BoundingBox(...)
 MAX_WAVE_HEIGHT = 2.0
-N_FEATURES = 32
 
-# Constantes de clase - UPPER_SNAKE_CASE
-class Config:
-    DEFAULT_TIMEOUT = 30
-    MAX_RETRIES = 3
+# Constantes de configuracion
+class DataConfig:
+    RAW_DIR = Path("data/raw")
+    PROCESSED_DIR = Path("data/processed")
 ```
 
-### 4.2 Clases y Tipos
-
-```python
-# Clases - PascalCase
-class FishingPredictor:
-    pass
-
-class MarineDataFetcher:
-    pass
-
-# NamedTuples - PascalCase (son tipos)
-class BoundingBox(NamedTuple):
-    pass
-```
-
-### 4.3 Funciones y Variables
+### 5.3 Funciones y Variables
 
 ```python
 # Funciones - snake_case
@@ -200,34 +294,15 @@ def calculate_sst_score(sst: float) -> float:
 
 # Variables - snake_case
 current_temperature = 17.5
-hotspot_distance = 500.0
-
-# Variables privadas - _prefijo
-_cache_data = {}
-```
-
-### 4.4 Evitar nombres genericos
-
-```python
-# INCORRECTO
-data = fetch_data()
-result = process(data)
-temp = calculate()
-
-# CORRECTO
-marine_points = fetch_marine_data()
-scored_zones = calculate_zone_scores(marine_points)
-sst_value = extract_sst(point)
 ```
 
 ---
 
-## 5. Type Hints Obligatorios
+## 6. Type Hints Obligatorios
 
-### 5.1 Funciones publicas
+### 6.1 Funciones publicas
 
 ```python
-# CORRECTO - Siempre tipar funciones publicas
 def calculate_score(
     lat: float,
     lon: float,
@@ -239,21 +314,7 @@ def calculate_score(
     ...
 ```
 
-### 5.2 Usar tipos de collections.abc
-
-```python
-from typing import Sequence, Mapping, Iterable
-
-# CORRECTO - Tipos abstractos para parametros
-def process_points(points: Sequence[MarinePoint]) -> List[float]:
-    pass
-
-# INCORRECTO - Tipos concretos para parametros
-def process_points(points: List[MarinePoint]) -> List[float]:
-    pass
-```
-
-### 5.3 Return types explicitos
+### 6.2 Return types explicitos
 
 ```python
 # CORRECTO
@@ -267,44 +328,6 @@ def get_hotspots():
 
 ---
 
-## 6. Manejo de Datos
-
-### 6.1 NO usar datos sinteticos
-
-```python
-# PROHIBIDO - Generacion de datos sinteticos
-def generate_synthetic_sst():
-    return np.random.normal(17.5, 2.0, size=1000)  # NO
-
-# CORRECTO - Solo datos reales
-def fetch_real_sst():
-    return erddap_client.get_sst(STUDY_AREA)
-```
-
-### 6.2 Prioridad de fuentes de datos
-
-1. **Global Fishing Watch** - Actividad pesquera real
-2. **Open-Meteo ERA5** - Reanalisis (datos reales procesados)
-3. **NOAA ERDDAP** - SST satelital
-4. **IMARPE** - Datos historicos verificados
-
-### 6.3 Cache con TTL
-
-```python
-# CORRECTO - Cache con tiempo de vida
-CACHE_TTL_HOURS = 6
-
-def get_cached_data(key: str) -> Optional[dict]:
-    cache_file = CACHE_DIR / f"{key}.json"
-    if cache_file.exists():
-        age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
-        if age_hours < CACHE_TTL_HOURS:
-            return json.loads(cache_file.read_text())
-    return None
-```
-
----
-
 ## 7. Imports
 
 ### 7.1 Orden de imports
@@ -312,20 +335,17 @@ def get_cached_data(key: str) -> Optional[dict]:
 ```python
 # 1. Standard library
 import os
-import json
-from typing import List, Dict, Tuple, Optional
-from dataclasses import dataclass
 from pathlib import Path
+from typing import List, Dict, Tuple
 
 # 2. Third party
 import numpy as np
 import pandas as pd
-import requests
 
 # 3. Local application
-from domain import HOTSPOTS, SPECIES, THRESHOLDS
+from domain import HOTSPOTS, SPECIES
+from data.data_config import DataConfig
 from models.features import FeatureExtractor
-from core.marine_data import MarineDataFetcher
 ```
 
 ### 7.2 Imports explicitos
@@ -333,6 +353,7 @@ from core.marine_data import MarineDataFetcher
 ```python
 # CORRECTO - Imports explicitos
 from domain import HOTSPOTS, SPECIES, THRESHOLDS
+from data.data_config import DataConfig
 
 # EVITAR - Import de todo
 from domain import *
@@ -340,45 +361,45 @@ from domain import *
 
 ---
 
-## 8. Documentacion
+## 8. Scripts de Datos
 
-### 8.1 Docstrings para funciones publicas
+### 8.1 Descarga incremental
 
-```python
-def calculate_thermal_front(
-    sst_grid: np.ndarray,
-    threshold: float = 0.45
-) -> np.ndarray:
-    """
-    Detecta frentes termicos usando algoritmo Belkin-O'Reilly.
+```bash
+# Descargar todo
+python scripts/update_database.py
 
-    Args:
-        sst_grid: Matriz 2D de SST en grados Celsius
-        threshold: Diferencia minima para detectar frente (default 0.45C)
+# Descargar fuente especifica
+python scripts/download_incremental.py --source copernicus_sst --start 2024-01 --end 2026-01
 
-    Returns:
-        Matriz binaria con 1 donde hay frente termico
-
-    References:
-        Belkin & O'Reilly (2009) - An algorithm for oceanic front detection
-    """
-    ...
+# Dry run (ver que se descargaria)
+python scripts/download_incremental.py --dry-run
 ```
 
-### 8.2 NO documentar codigo obvio
+### 8.2 Validacion
+
+```bash
+# Validar todas las capas
+python scripts/validate_data.py --all
+
+# Validar capa especifica
+python scripts/validate_data.py --bronze
+python scripts/validate_data.py --silver
+```
+
+### 8.3 Consolidacion
 
 ```python
-# INCORRECTO - Comentario obvio
-# Incrementa el contador
-counter += 1
+from data.consolidator import Consolidator
 
-# CORRECTO - Sin comentario innecesario
-counter += 1
+# Consolidar todo
+consolidator = Consolidator()
+consolidator.consolidate_all()
 
-# CORRECTO - Comentario que explica el "por que"
-# Umbral de 0.45C basado en Belkin-O'Reilly 2009
-if gradient > 0.45:
-    is_front = True
+# Consolidar fuente especifica
+consolidator.consolidate_fishing()
+consolidator.consolidate_marine()
+consolidator.consolidate_sst()
 ```
 
 ---
@@ -392,69 +413,57 @@ tests/
 ├── test_domain.py       # Tests de constantes
 ├── test_features.py     # Tests de extraccion
 ├── test_predictor.py    # Tests de ML
+├── test_data_config.py  # Tests de configuracion
 └── conftest.py          # Fixtures compartidos
 ```
 
-### 9.2 Naming convention
+### 9.2 Tests de datos
 
 ```python
-def test_species_temp_score_in_range():
-    """Score debe ser 1.0 cuando SST esta en rango optimo."""
-    ...
-
-def test_species_temp_score_out_of_range():
-    """Score debe ser <1.0 cuando SST esta fuera de rango."""
-    ...
+def test_bronze_layer_integrity():
+    """Verifica que Bronze layer tiene manifests validos."""
+    from scripts.validate_data import DataValidator
+    validator = DataValidator()
+    errors = validator.validate_bronze()
+    assert len(errors) == 0
 ```
 
 ---
 
-## 10. Performance
-
-### 10.1 Evitar recalculos
-
-```python
-# INCORRECTO - Recalcula len() en cada iteracion
-for i in range(len(points)):
-    process(points[i])
-
-# CORRECTO - Calcula una vez o usa enumerate
-n_points = len(points)
-for i in range(n_points):
-    process(points[i])
-
-# MEJOR - Usa enumerate o iteracion directa
-for point in points:
-    process(point)
-```
-
-### 10.2 Lazy evaluation
-
-```python
-# CORRECTO - Generador para datos grandes
-def iter_marine_points(coords: Iterable[Tuple[float, float]]):
-    for lat, lon in coords:
-        yield fetch_point(lat, lon)
-
-# USO - No carga todo en memoria
-for point in iter_marine_points(coordinates):
-    process(point)
-```
-
----
-
-## 11. Checklist Pre-Commit
+## 10. Checklist Pre-Commit
 
 Antes de hacer commit, verificar:
 
 - [ ] `domain.py` no tiene imports circulares
 - [ ] No hay constantes hardcodeadas fuera de `domain.py`
+- [ ] No hay paths hardcodeados fuera de `DataConfig`
 - [ ] No hay datos sinteticos
+- [ ] No hay credenciales en el codigo
 - [ ] Todas las funciones publicas tienen type hints
 - [ ] Tests pasan: `python -m pytest tests/`
-- [ ] Imports ordenados correctamente
-- [ ] No hay variables intermedias innecesarias
-- [ ] Estructuras de datos son inmutables donde sea posible
+- [ ] Datos validan: `python scripts/validate_data.py --all`
+- [ ] `.env` esta en `.gitignore`
+
+---
+
+## 11. Comandos Utiles
+
+```bash
+# Actualizar base de datos completa
+python scripts/update_database.py
+
+# Validar integridad
+python scripts/validate_data.py --all
+
+# Ver estado de manifests
+python -c "from data.manifest import ManifestManager; m = ManifestManager('gfw'); print(m.get_summary())"
+
+# Consolidar datos
+python -c "from data.consolidator import Consolidator; Consolidator().consolidate_all()"
+
+# Ejecutar tests
+python -m pytest tests/ -v
+```
 
 ---
 
@@ -462,9 +471,9 @@ Antes de hacer commit, verificar:
 
 - [PEP 8 - Style Guide](https://peps.python.org/pep-0008/)
 - [PEP 484 - Type Hints](https://peps.python.org/pep-0484/)
-- [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html)
-- [NumPy Docstring Guide](https://numpydoc.readthedocs.io/en/latest/format.html)
+- [Data Lakehouse Architecture](https://www.databricks.com/glossary/data-lakehouse)
+- [Medallion Architecture](https://www.databricks.com/glossary/medallion-architecture)
 
 ---
 
-*Lineamientos establecidos: 2026-01-28*
+*Lineamientos establecidos: 2026-01-30*

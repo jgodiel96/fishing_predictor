@@ -36,3 +36,7 @@ branca>=0.6.0
 # Utilities
 python-dateutil>=2.8.0
 pytz>=2023.3
+python-dotenv>=1.0.0
+
+# Data formats
+pyarrow>=14.0.0

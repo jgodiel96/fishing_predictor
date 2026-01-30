@@ -16,6 +16,11 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
+import sys
+
+# Import domain constants
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from domain import HOTSPOTS, SPECIES_BY_NAME, THRESHOLDS, ENDPOINTS
 
 
 @dataclass
@@ -72,7 +77,7 @@ class MarineDataFetcher:
     - Altura y período de olas
     """
 
-    BASE_URL = "https://marine-api.open-meteo.com/v1/marine"
+    BASE_URL = ENDPOINTS.openmeteo_marine
 
     def __init__(self, cache_dir: str = None):
         if cache_dir is None:
@@ -445,27 +450,8 @@ class ThermalFrontDetector:
 class FishZonePredictor:
     """
     Predice zonas de actividad de peces basado en datos reales.
+    Uses centralized HOTSPOTS and SPECIES from domain.py
     """
-
-    # Patrones históricos conocidos para la zona Tacna-Ilo
-    HISTORICAL_HOTSPOTS = [
-        # (lat, lon, nombre, factor_bonus)
-        (-17.70, -71.33, "Punta Coles", 1.3),      # Reserva, mucha vida
-        (-17.78, -71.12, "Pozo Redondo", 1.2),     # Pozas naturales
-        (-17.82, -71.08, "Punta Blanca", 1.25),    # Punta rocosa
-        (-17.93, -70.97, "Ite", 1.15),             # Zona de surgencia
-        (-18.02, -70.91, "Vila Vila", 1.2),        # Rocas con estructura
-        (-18.12, -70.84, "Boca del Río", 1.1),     # Desembocadura
-    ]
-
-    # SST óptimo para especies objetivo
-    SST_OPTIMAL = {
-        "Cabrilla": (16, 19),
-        "Corvina": (15, 18),
-        "Robalo": (17, 21),
-        "Lenguado": (14, 17),
-        "Pejerrey": (14, 18),
-    }
 
     def __init__(self):
         self.marine_fetcher = MarineDataFetcher()
@@ -558,27 +544,26 @@ class FishZonePredictor:
         - Conocimiento de pescadores locales documentado
         - Cartas náuticas de zonas de pesca
 
-        Estas son ubicaciones verificadas donde históricamente
-        se han registrado capturas importantes.
+        Uses centralized HOTSPOTS from domain.py
         """
         zones = []
 
-        for i, (lat, lon, name, bonus) in enumerate(self.HISTORICAL_HOTSPOTS):
+        for i, hotspot in enumerate(HOTSPOTS):
             # Mover punto hacia el mar (~2km)
-            zone_lon = lon - 0.02
+            zone_lon = hotspot.lon - 0.02
 
             # Intensidad base con bonus histórico
-            base_intensity = 0.6 * bonus
+            base_intensity = 0.6 * hotspot.bonus_factor
 
             zones.append({
                 'id': i + 1,
-                'lat': lat,
+                'lat': hotspot.lat,
                 'lon': zone_lon,
                 'radius': 250,
                 'intensity': min(1.0, base_intensity),
                 'movement_direction': 90 + np.random.normal(0, 15),  # Hacia la costa
-                'cause': f'historical_imarpe ({name})',
-                'sst': 17.5,  # Climatología promedio de la zona
+                'cause': f'historical_imarpe ({hotspot.name})',
+                'sst': THRESHOLDS.sst_optimal_center,
                 'sst_source': 'climatology_imarpe'
             })
 
@@ -586,21 +571,19 @@ class FishZonePredictor:
 
     def _calculate_sst_score(self, sst: float) -> float:
         """
-        Calcula score basado en SST.
-        Rango óptimo: 16-19°C para especies objetivo.
+        Calcula score basado en SST usando THRESHOLDS de domain.py.
         """
-        optimal_min, optimal_max = 16, 19
+        optimal_min = THRESHOLDS.sst_optimal_min
+        optimal_max = THRESHOLDS.sst_optimal_max
+        center = THRESHOLDS.sst_optimal_center
 
         if optimal_min <= sst <= optimal_max:
-            # Dentro del rango óptimo
-            center = (optimal_min + optimal_max) / 2
             distance = abs(sst - center)
-            return 1.0 - (distance / 3)
+            half_range = (optimal_max - optimal_min) / 2
+            return 1.0 - (distance / half_range) * 0.5
         elif sst < optimal_min:
-            # Muy frío
             return max(0.2, 1.0 - (optimal_min - sst) / 5)
         else:
-            # Muy cálido
             return max(0.2, 1.0 - (sst - optimal_max) / 5)
 
     def _fallback_prediction(
@@ -611,24 +594,22 @@ class FishZonePredictor:
         """
         Predicción de respaldo usando patrones históricos REALES de IMARPE.
 
-        Cuando las APIs de datos en tiempo real no están disponibles,
-        esta función retorna zonas basadas en datos históricos verificados
-        del Instituto del Mar del Perú (IMARPE).
+        Uses centralized HOTSPOTS from domain.py
         """
         print("[INFO] Usando predicción de respaldo (patrones históricos IMARPE)")
 
         zones = []
 
-        for i, (lat, lon, name, bonus) in enumerate(self.HISTORICAL_HOTSPOTS[:num_zones]):
+        for i, hotspot in enumerate(HOTSPOTS[:num_zones]):
             zones.append({
                 'id': i + 1,
-                'lat': lat,
-                'lon': lon - 0.02,
+                'lat': hotspot.lat,
+                'lon': hotspot.lon - 0.02,
                 'radius': 200,
-                'intensity': 0.5 + bonus * 0.3,
+                'intensity': 0.5 + hotspot.bonus_factor * 0.3,
                 'movement_direction': 90 + np.random.normal(0, 30),
-                'cause': f'historical_imarpe ({name})',
-                'sst': 17.0,  # Climatología IMARPE
+                'cause': f'historical_imarpe ({hotspot.name})',
+                'sst': THRESHOLDS.sst_optimal_center,
                 'sst_source': 'climatology_imarpe'
             })
 

@@ -8,8 +8,18 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional
 
+# Import centralized data configuration
+try:
+    from data.data_config import DataConfig, LEGACY_DB
+except ImportError:
+    # Fallback if data_config not available
+    DataConfig = None
+    LEGACY_DB = Path("data/real_only/real_data_100.db")
+
 from models.predictor import FishingPredictor
 from models.features import FeatureExtractor
+from models.timeline import TimelineAnalyzer, generate_timeline_data
+from models.anchovy_migration import AnchovyMigrationModel, get_anchovy_predictions
 from views.map_view import MapView, MapConfig
 from core.marine_data import MarineDataFetcher, FishZonePredictor
 from core.weather_solunar import get_fishing_conditions
@@ -20,6 +30,13 @@ try:
     HISTORICAL_AVAILABLE = True
 except ImportError:
     HISTORICAL_AVAILABLE = False
+
+# Timeline data availability
+try:
+    _db_path = LEGACY_DB if DataConfig is None else DataConfig.LEGACY_DB
+    TIMELINE_AVAILABLE = _db_path.exists()
+except:
+    TIMELINE_AVAILABLE = False
 
 
 class AnalysisController:
@@ -66,6 +83,10 @@ class AnalysisController:
         # Fish movement prediction
         self.movement_predictor: Optional['FishMovementPredictor'] = None
         self.future_hotspots: List[Dict] = []
+
+        # Anchovy migration model
+        self.anchovy_model: Optional[AnchovyMigrationModel] = None
+        self.anchovy_zones: List[Dict] = []
 
         # Historical data for supervised learning
         self.historical_fetcher: Optional['HistoricalDataFetcher'] = None
@@ -159,6 +180,50 @@ class AnalysisController:
         predictor = FishZonePredictor()
         self.fish_zones = predictor.predict_zones(self.coastline_points, num_zones)
         return self.fish_zones
+
+    def predict_anchovy_migration(self, target_date: str = None, target_hour: int = 17) -> List[Dict]:
+        """
+        Predict anchovy concentration zones based on migration patterns.
+
+        Args:
+            target_date: Target date (default: today)
+            target_hour: Hour of day (default: 5 PM peak time)
+
+        Returns:
+            List of predicted anchovy zones
+        """
+        if not target_date:
+            target_date = datetime.now().strftime('%Y-%m-%d')
+
+        print(f"[INFO] Prediciendo migracion de anchoveta para {target_date} {target_hour}:00...")
+
+        try:
+            self.anchovy_model = AnchovyMigrationModel()
+            self.anchovy_zones = self.anchovy_model.predict_concentration_zones(
+                target_date, target_hour, num_zones=8
+            )
+
+            # Add anchovy zones to fish_zones with special marker
+            for i, zone in enumerate(self.anchovy_zones):
+                self.fish_zones.append({
+                    'id': f'anchovy_{i+1}',
+                    'lat': zone['lat'],
+                    'lon': zone['lon'],
+                    'intensity': min(zone['score'] / 100, 1.0),
+                    'radius': 400,  # Larger radius for anchovy schools
+                    'cause': f"Anchoveta (score: {zone['score']:.0f})",
+                    'sst': zone['avg_sst'],
+                    'is_anchovy': True,
+                    'historical_hours': zone['historical_hours'],
+                    'migration_applied': zone['migration_applied']
+                })
+
+            print(f"[OK] {len(self.anchovy_zones)} zonas de anchoveta predichas")
+            return self.anchovy_zones
+
+        except Exception as e:
+            print(f"[WARN] Error en prediccion de anchoveta: {e}")
+            return []
 
     def run_ml_prediction(self) -> Dict:
         """Run ML prediction using extracted features (32 advanced features)."""
@@ -273,6 +338,17 @@ class AnalysisController:
         self.map_view.add_marine_points(self.marine_points)
         self.map_view.add_fishing_spots(self.sampled_spots)
         self.map_view.add_legend()
+
+        # Add timeline if data available
+        if TIMELINE_AVAILABLE:
+            try:
+                print("[INFO] Generando datos de linea de tiempo...")
+                timeline_data = generate_timeline_data()
+                self.map_view.add_timeline(timeline_data)
+                print(f"[OK] Timeline con {len(timeline_data.get('monthly_stats', []))} meses de datos")
+            except Exception as e:
+                print(f"[WARN] No se pudo agregar timeline: {e}")
+
         self.map_view.finalize()
 
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -641,72 +717,98 @@ class AnalysisController:
         self,
         coastline_path: str,
         output_path: str = "output/analysis_supervised.html",
-        train_years: int = 4
+        train_years: int = 4,
+        target_hour: int = 17
     ) -> Dict:
         """
         Run complete analysis with supervised ML model.
 
         This first trains on historical data, then runs the prediction.
+
+        Args:
+            coastline_path: Path to coastline GeoJSON
+            output_path: Output HTML path
+            train_years: Years of historical data for training
+            target_hour: Target hour for anchovy prediction (default 5 PM)
         """
         print("=" * 60)
         print("   ANALISIS DE PESCA CON ML SUPERVISADO")
+        print("   + MODELO DE MIGRACION DE ANCHOVETA")
         print("=" * 60)
-        print(f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n")
+        print(f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+        print(f"Hora objetivo: {target_hour}:00\n")
 
         # 1. Load coastline
-        print("[1/9] Cargando linea costera...")
+        print("[1/10] Cargando linea costera...")
         n_points = self.load_coastline(coastline_path)
-        print(f"      {n_points} puntos cargados")
+        print(f"       {n_points} puntos cargados")
 
         # 2. Train with historical data
-        print("\n[2/9] Entrenando modelo con datos historicos...")
+        print("\n[2/10] Entrenando modelo con datos historicos...")
         train_stats = self.train_with_historical_data(
             start_date=(datetime.now() - timedelta(days=365 * train_years)).strftime("%Y-%m-%d"),
             end_date=datetime.now().strftime("%Y-%m-%d")
         )
 
         # 3. Sample spots
-        print("\n[3/9] Muestreando puntos de pesca...")
+        print("\n[3/10] Muestreando puntos de pesca...")
         spots = self.sample_fishing_spots()
-        print(f"      {len(spots)} spots muestreados")
+        print(f"       {len(spots)} spots muestreados")
 
         # 4. Generate fish zones
-        print("\n[4/9] Generando zonas de peces...")
+        print("\n[4/10] Generando zonas de peces...")
         zones = self.generate_fish_zones()
-        print(f"      {len(zones)} zonas generadas")
+        print(f"       {len(zones)} zonas base generadas")
 
-        # 5. Fetch marine data
-        print("\n[5/9] Obteniendo datos marinos...")
+        # 5. Predict anchovy migration (NEW)
+        print("\n[5/10] Prediciendo migracion de anchoveta...")
+        anchovy_zones = self.predict_anchovy_migration(
+            target_date=datetime.now().strftime('%Y-%m-%d'),
+            target_hour=target_hour
+        )
+
+        # 6. Fetch marine data
+        print("\n[6/10] Obteniendo datos marinos...")
         self.fetch_marine_data()
 
-        # 6. Predict fish movement
-        print("\n[6/9] Prediciendo movimiento de peces (24h)...")
+        # 7. Predict fish movement
+        print("\n[7/10] Prediciendo movimiento de peces (24h)...")
         future = self.predict_fish_movement(hours_ahead=24)
-        print(f"      {len(future)} predicciones de movimiento")
+        print(f"       {len(future)} predicciones de movimiento")
 
-        # 7. Get conditions
-        print("\n[7/9] Obteniendo condiciones...")
+        # 8. Get conditions
+        print("\n[8/10] Obteniendo condiciones...")
         self.get_conditions()
 
-        # 8. ML prediction (now supervised)
-        print("\n[8/9] Ejecutando prediccion ML supervisada...")
+        # 9. ML prediction (now supervised)
+        print("\n[9/10] Ejecutando prediccion ML supervisada...")
         self.run_ml_prediction()
 
-        # 9. Analyze and create map
-        print("\n[9/9] Analizando y generando mapa...")
+        # 10. Analyze and create map
+        print("\n[10/10] Analizando y generando mapa...")
         results = self.analyze_spots()
         self.create_map(output_path)
 
         self._print_results(results[:5])
 
+        # Print anchovy info
+        if self.anchovy_zones:
+            print(f"\n{'=' * 60}")
+            print("ZONAS DE ANCHOVETA PREDICHAS")
+            print("=" * 60)
+            for i, z in enumerate(self.anchovy_zones[:5]):
+                print(f"  #{i+1} Score:{z['score']:.0f} | {z['lat']:.3f}, {z['lon']:.3f} | SST:{z['avg_sst']:.1f}C | Hist:{z['historical_hours']:.0f}h")
+
         print(f"\n{'=' * 60}")
         print(f"MAPA GUARDADO: {output_path}")
         print(f"MODO: {'SUPERVISADO' if self.is_supervised_mode else 'NO SUPERVISADO'}")
+        print(f"ZONAS ANCHOVETA: {len(self.anchovy_zones)}")
         print("=" * 60)
 
         return {
             'spots': results,
             'zones': zones,
+            'anchovy_zones': self.anchovy_zones,
             'future_hotspots': future,
             'training_stats': train_stats,
             'map_path': output_path

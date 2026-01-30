@@ -573,5 +573,48 @@ fishstat (R)
 
 ---
 
-*Document created: January 2026*
+## 9. Integration with Project
+
+### 9.1 Using Domain Constants
+
+All API endpoints and dataset configurations are centralized in `domain.py`:
+
+```python
+from domain import ENDPOINTS, ERDDAP_DATASETS, STUDY_AREA
+
+# API endpoints
+print(ENDPOINTS.erddap_base)      # https://coastwatch.pfeg.noaa.gov/erddap
+print(ENDPOINTS.openmeteo_marine) # https://marine-api.open-meteo.com/v1/marine
+
+# ERDDAP datasets
+for ds in ERDDAP_DATASETS:
+    print(f"{ds.dataset_id}: {ds.description}")
+
+# Study area bounds
+print(f"Region: {STUDY_AREA.north}N to {STUDY_AREA.south}S")
+```
+
+### 9.2 Data Fetcher Usage
+
+```python
+from core.marine_data import MarineDataFetcher
+from data.fetchers.historical_fetcher import HistoricalDataFetcher
+
+# Real-time data
+fetcher = MarineDataFetcher()
+points = fetcher.fetch_points(coordinates)
+
+# Historical data (requires API keys)
+hist_fetcher = HistoricalDataFetcher()
+sst_data = hist_fetcher.fetch_noaa_erddap_sst("2025-01-01", "2026-01-28")
+```
+
+### 9.3 No Synthetic Data Policy
+
+This project uses **ONLY real data**. All data sources listed in this document provide actual satellite observations or validated reanalysis products. See `DEVELOPMENT_GUIDELINES.md` for data handling policies.
+
+---
+
+*Document updated: 2026-01-28*
 *For fishing prediction project - Peru/South America focus*
+*See also: `DEVELOPMENT_GUIDELINES.md` for coding standards*

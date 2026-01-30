@@ -35,3 +35,17 @@ output/*.json
 # Logs
 *.log
 anaconda_projects/
+
+# Credentials - NEVER commit these
+.env
+.env.local
+.env.*.local
+credentials.json
+*_credentials.json
+*.pem
+*.key
+
+# Data layers (too large for git, regenerable)
+data/raw/
+data/processed/
+data/analytics/

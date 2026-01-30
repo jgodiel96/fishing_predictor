@@ -549,30 +549,7 @@ class HistoricalDataFetcher:
                 print(f"[OK] Loaded {len(X)} REAL samples (Open-Meteo ERA5)")
                 return X, y
 
-        # Priority 2: Legacy training data (may contain estimated SST)
-        training_db = self.cache_dir / "training_data.db"
-        if training_db.exists():
-            print(f"[INFO] Loading training data from: {training_db}")
-            conn = sqlite3.connect(training_db)
-            cursor = conn.cursor()
-
-            cursor.execute('''
-                SELECT sst, sst_anomaly, lat, lon, month, fishing_hours
-                FROM training_samples
-                WHERE sst IS NOT NULL
-            ''')
-
-            rows = cursor.fetchall()
-            conn.close()
-
-            if rows:
-                data = np.array(rows)
-                X = data[:, :5]
-                y = data[:, 5]
-                print(f"[OK] Loaded {len(X)} samples from training database")
-                return X, y
-
-        # Fallback to ocean_data table
+        # Fallback to ocean_data table (no synthetic data)
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 

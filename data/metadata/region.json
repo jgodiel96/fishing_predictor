@@ -1,0 +1,105 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-01-29",
+  "region": {
+    "name": "Tacna-Ilo Coastal Zone",
+    "country": "Peru",
+    "description": "Southern Peruvian coast from Tacna to Ilo, influenced by Humboldt Current",
+    "bounding_box": {
+      "lat_min": -18.3,
+      "lat_max": -17.3,
+      "lon_min": -71.5,
+      "lon_max": -70.8
+    },
+    "center": {
+      "lat": -17.8,
+      "lon": -71.15
+    },
+    "area_km2": 7700,
+    "coastline_km": 150
+  },
+  "oceanography": {
+    "current_system": "Humboldt Current (Peru Current)",
+    "upwelling": {
+      "type": "coastal",
+      "intensity": "high",
+      "peak_months": [6, 7, 8, 9],
+      "description": "Strong wind-driven coastal upwelling bringing cold, nutrient-rich water"
+    },
+    "temperature": {
+      "annual_mean_sst": 17.5,
+      "summer_mean": 20.0,
+      "winter_mean": 15.5,
+      "range": [14.0, 23.0]
+    },
+    "productivity": {
+      "level": "very_high",
+      "chlorophyll_range": [1.0, 15.0],
+      "primary_driver": "upwelling"
+    }
+  },
+  "fishing": {
+    "main_species": [
+      {
+        "name": "Anchoveta",
+        "scientific_name": "Engraulis ringens",
+        "sst_optimal": [16.5, 19.5],
+        "peak_season": [5, 6, 7, 8, 9, 10]
+      },
+      {
+        "name": "Cabrilla",
+        "scientific_name": "Paralabrax humeralis",
+        "sst_optimal": [16.0, 19.0],
+        "habitat": "rocky"
+      },
+      {
+        "name": "Corvina",
+        "scientific_name": "Cilus gilberti",
+        "sst_optimal": [15.0, 18.0],
+        "habitat": "sandy"
+      },
+      {
+        "name": "Robalo",
+        "scientific_name": "Centropomus sp.",
+        "sst_optimal": [17.0, 21.0],
+        "habitat": "mixed"
+      },
+      {
+        "name": "Lenguado",
+        "scientific_name": "Paralichthys adspersus",
+        "sst_optimal": [14.0, 17.0],
+        "habitat": "sandy"
+      },
+      {
+        "name": "Pejerrey",
+        "scientific_name": "Odontesthes regia",
+        "sst_optimal": [14.0, 18.0],
+        "habitat": "sandy"
+      }
+    ],
+    "hotspots": [
+      {"name": "Punta Coles", "lat": -17.7, "lon": -71.38, "quality": 1.35},
+      {"name": "Punta Blanca", "lat": -17.65, "lon": -71.35, "quality": 1.2},
+      {"name": "Pozo Redondo", "lat": -17.63, "lon": -71.34, "quality": 1.15},
+      {"name": "Vila Vila", "lat": -17.85, "lon": -71.05, "quality": 1.1},
+      {"name": "Fundicion", "lat": -17.75, "lon": -71.35, "quality": 1.1},
+      {"name": "Boca del Rio", "lat": -18.0, "lon": -70.85, "quality": 1.0},
+      {"name": "Los Palos", "lat": -18.05, "lon": -70.82, "quality": 1.0},
+      {"name": "Playa Meca", "lat": -17.58, "lon": -71.33, "quality": 0.95}
+    ]
+  },
+  "grid_settings": {
+    "resolution_degrees": 0.1,
+    "resolution_km": 11.1,
+    "n_lat_points": 11,
+    "n_lon_points": 8,
+    "total_grid_points": 88
+  },
+  "data_coverage": {
+    "target_period": {
+      "start": "2020-01-01",
+      "end": "2026-01-31"
+    },
+    "total_months": 73
+  }
+}

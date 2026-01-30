@@ -160,28 +160,42 @@ El Sistema de Corriente de Humboldt Norte (NHCS) es el **ecosistema mas producti
 
 ---
 
-## 5. Especies Locales (Tacna-Ilo)
+## 5. Especies Objetivo (Tacna-Ilo)
 
 ### 5.1 Rangos de Temperatura Optima
 
-| Especie | Temp Optima | Notas |
-|---------|-------------|-------|
-| **Cabrilla** | 16-19°C | Zonas rocosas |
-| **Corvina** | 15-18°C | Fondos arenosos |
-| **Robalo** | 17-21°C | Estructuras, desembocaduras |
-| **Lenguado** | 14-17°C | Fondos arenosos |
-| **Pejerrey** | 14-18°C | Aguas costeras |
+| Especie | Temp Optima | Sustrato | Senuelos |
+|---------|-------------|----------|----------|
+| **Cabrilla** | 16-19°C | Roca | Grubs 3", jigs 15-25g |
+| **Corvina** | 15-18°C | Arena, Mixto | Jigs metalicos 30-50g |
+| **Robalo** | 17-21°C | Roca, Mixto | Poppers 12cm, minnows |
+| **Lenguado** | 14-17°C | Arena | Vinilos paddle tail |
+| **Pejerrey** | 14-18°C | Arena, Mixto | Cucharillas pequenas |
 
-### 5.2 Hotspots Historicos
+### 5.2 Hotspots Verificados (18 Ubicaciones)
 
-| Ubicacion | Lat | Lon | Factor Bonus | Caracteristica |
-|-----------|-----|-----|--------------|----------------|
-| Punta Coles | -17.70 | -71.33 | 1.3 | Reserva, mucha vida |
-| Pozo Redondo | -17.78 | -71.12 | 1.2 | Pozas naturales |
-| Punta Blanca | -17.82 | -71.08 | 1.25 | Punta rocosa |
-| Ite | -17.93 | -70.97 | 1.15 | Zona de surgencia |
-| Vila Vila | -18.02 | -70.91 | 1.2 | Rocas con estructura |
-| Boca del Rio | -18.12 | -70.84 | 1.1 | Desembocadura |
+Basados en datos de IMARPE y conocimiento de pescadores locales:
+
+| Ubicacion | Lat | Lon | Sustrato | Bonus | Caracteristica |
+|-----------|-----|-----|----------|-------|----------------|
+| **Punta Coles** | -17.702 | -71.332 | Roca | 1.35 | Reserva, mucha vida |
+| **Punta Blanca** | -17.812 | -71.082 | Roca | 1.30 | Punta rocosa, robalo |
+| **Pozo Redondo** | -17.782 | -71.122 | Mixto | 1.25 | Pozas naturales |
+| **Vila Vila** | -18.018 | -70.912 | Roca | 1.25 | Rocas con estructura |
+| **Fundicion** | -17.757 | -71.172 | Roca | 1.20 | Rocas grandes |
+| **Pozo Lizas** | -17.642 | -71.340 | Roca | 1.20 | Ideal spinning |
+| **Ite Sur** | -17.872 | -71.018 | Roca | 1.20 | Cabrilla |
+| **Ite Norte** | -17.932 | -70.968 | Arena | 1.20 | Surgencia activa |
+| **Boca del Rio** | -18.1205 | -70.843 | Arena | 1.20 | Desembocadura |
+| **Pocoma** | -17.682 | -71.295 | Roca | 1.15 | Acantilados |
+| **Ite Centro** | -17.902 | -70.992 | Mixto | 1.15 | Productivo |
+| **Punta Mesa** | -17.988 | -70.935 | Roca | 1.15 | Punta con pozas |
+| **Gentillar** | -17.842 | -71.048 | Roca | 1.15 | Costa escarpada |
+| **Santa Rosa** | -18.087 | -70.868 | Arena | 1.15 | Corvina |
+| **Ilo Puerto** | -17.632 | -71.345 | Mixto | 1.10 | Muelle |
+| **Media Luna** | -17.732 | -71.222 | Arena | 1.10 | Bahia |
+| **Carlepe** | -17.962 | -70.948 | Mixto | 1.10 | Alternado |
+| **Los Palos** | -18.052 | -70.883 | Mixto | 1.10 | Disperso |
 
 ---
 
@@ -218,9 +232,9 @@ El Sistema de Corriente de Humboldt Norte (NHCS) es el **ecosistema mas producti
 
 ```
 1. RECOLECCION DE DATOS:
-   - SST: MODIS-Aqua o NOAA-AVHRR (diario, 1km)
-   - Chl-a: MODIS-Aqua (diario, 1km)
-   - Corrientes: OSCAR o HYCOM
+   - SST: Open-Meteo Marine API (tiempo real) o MODIS-Aqua (diario, 1km)
+   - Chl-a: MODIS-Aqua (diario, 1km) o VIIRS
+   - Corrientes: Open-Meteo Marine o HYCOM
    - SSH: Datos altimetria
 
 2. DETECCION DE FRENTES (Cayula-Cornillon SIED):
@@ -230,9 +244,9 @@ El Sistema de Corriente de Humboldt Norte (NHCS) es el **ecosistema mas producti
 
 3. CLASIFICACION PFZ:
    SI (14°C < SST < 24°C) Y
-      (Chl-a > 6.5 mg/m³) Y
+      (Chl-a > 2.0 mg/m³) Y
       (frente_termico_presente) Y
-      (34.4 < salinidad < 35.3):
+      (condiciones_seguras):
       ENTONCES: zona de pesca ALTA probabilidad
 
 4. FACTORES TEMPORALES:
@@ -256,6 +270,7 @@ El Sistema de Corriente de Humboldt Norte (NHCS) es el **ecosistema mas producti
 - Thyng et al. (2016) - "True Colors of Oceanography" - Colormaps cientificos
 - Nature Communications - Upwelling y produccion biologica
 - Royal Society - Patrones espaciales de anchoveta
+- Chavez et al. (2008) - Climate and fisheries in the Humboldt Current
 
 ### APIs y Herramientas
 - [Open-Meteo Marine API](https://open-meteo.com/en/docs/marine-weather-api)
@@ -297,5 +312,5 @@ pip install numpy pandas scipy
 
 ---
 
-*Documento generado: Enero 2026*
+*Documento actualizado: 2026-01-28*
 *Proyecto: Fishing Predictor - Tacna/Ilo, Peru*

@@ -1,0 +1,118 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-01-29",
+  "description": "Database schemas for Silver layer consolidated databases",
+  "databases": {
+    "fishing_consolidated.db": {
+      "description": "Consolidated fishing activity from all sources",
+      "tables": {
+        "fishing": {
+          "description": "Fishing events from GFW AIS and user reports",
+          "columns": [
+            {"name": "date", "type": "TEXT", "nullable": false, "description": "Date of observation (YYYY-MM-DD)"},
+            {"name": "lat", "type": "REAL", "nullable": false, "description": "Latitude in decimal degrees"},
+            {"name": "lon", "type": "REAL", "nullable": false, "description": "Longitude in decimal degrees"},
+            {"name": "fishing_hours", "type": "REAL", "nullable": true, "description": "Total fishing hours"},
+            {"name": "vessel_id", "type": "TEXT", "nullable": true, "description": "Anonymized vessel ID"},
+            {"name": "flag_state", "type": "TEXT", "nullable": true, "description": "Vessel flag (ISO 3166)"},
+            {"name": "gear_type", "type": "TEXT", "nullable": true, "description": "Fishing gear type"},
+            {"name": "source", "type": "TEXT", "nullable": true, "description": "Data source (gfw_ais, user_report)"},
+            {"name": "data_source", "type": "TEXT", "nullable": true, "description": "Bronze layer source"}
+          ],
+          "primary_key": null,
+          "indices": [
+            {"name": "idx_fishing_date", "columns": ["date"]},
+            {"name": "idx_fishing_location", "columns": ["lat", "lon"]}
+          ],
+          "unique_constraints": [
+            {"columns": ["date", "lat", "lon", "vessel_id"], "description": "Deduplication key"}
+          ]
+        }
+      }
+    },
+    "marine_consolidated.db": {
+      "description": "Consolidated marine conditions from all sources",
+      "tables": {
+        "marine": {
+          "description": "Wave and wind conditions from Open-Meteo ERA5",
+          "columns": [
+            {"name": "date", "type": "TEXT", "nullable": false, "description": "Date (YYYY-MM-DD)"},
+            {"name": "lat", "type": "REAL", "nullable": false, "description": "Latitude"},
+            {"name": "lon", "type": "REAL", "nullable": false, "description": "Longitude"},
+            {"name": "wave_height", "type": "REAL", "nullable": true, "description": "Significant wave height (m)"},
+            {"name": "wave_period", "type": "REAL", "nullable": true, "description": "Peak wave period (s)"},
+            {"name": "wave_direction", "type": "REAL", "nullable": true, "description": "Wave direction (degrees)"},
+            {"name": "wind_speed", "type": "REAL", "nullable": true, "description": "Wind speed at 10m (m/s)"},
+            {"name": "wind_direction", "type": "REAL", "nullable": true, "description": "Wind direction (degrees)"},
+            {"name": "source", "type": "TEXT", "nullable": true, "description": "Data source"}
+          ],
+          "primary_key": null,
+          "indices": [
+            {"name": "idx_marine_date", "columns": ["date"]},
+            {"name": "idx_marine_location", "columns": ["lat", "lon"]}
+          ],
+          "unique_constraints": [
+            {"columns": ["date", "lat", "lon"], "description": "Deduplication key"}
+          ]
+        },
+        "sst": {
+          "description": "Sea surface temperature from satellite sources",
+          "columns": [
+            {"name": "date", "type": "TEXT", "nullable": false, "description": "Date (YYYY-MM-DD)"},
+            {"name": "lat", "type": "REAL", "nullable": false, "description": "Latitude"},
+            {"name": "lon", "type": "REAL", "nullable": false, "description": "Longitude"},
+            {"name": "sst", "type": "REAL", "nullable": false, "description": "Sea surface temperature (Celsius)"},
+            {"name": "sst_source", "type": "TEXT", "nullable": true, "description": "SST data source"}
+          ],
+          "primary_key": null,
+          "indices": [
+            {"name": "idx_sst_date", "columns": ["date"]},
+            {"name": "idx_sst_location", "columns": ["lat", "lon"]}
+          ],
+          "unique_constraints": [
+            {"columns": ["date", "lat", "lon"], "description": "Deduplication key"}
+          ]
+        }
+      }
+    }
+  },
+  "parquet_schemas": {
+    "training_features.parquet": {
+      "description": "Pre-computed ML features for training",
+      "columns": [
+        {"name": "date", "type": "string", "description": "Date"},
+        {"name": "lat", "type": "float64", "description": "Latitude"},
+        {"name": "lon", "type": "float64", "description": "Longitude"},
+        {"name": "wave_height", "type": "float64", "description": "Wave height (m)"},
+        {"name": "wave_period", "type": "float64", "description": "Wave period (s)"},
+        {"name": "wave_direction", "type": "float64", "description": "Wave direction (deg)"},
+        {"name": "wind_speed", "type": "float64", "description": "Wind speed (m/s)"},
+        {"name": "wind_direction", "type": "float64", "description": "Wind direction (deg)"},
+        {"name": "sst", "type": "float64", "description": "Sea surface temperature (C)"},
+        {"name": "fishing_hours", "type": "float64", "description": "Fishing hours"},
+        {"name": "is_fishing", "type": "int64", "description": "Binary fishing flag (0/1)"},
+        {"name": "month", "type": "int64", "description": "Month (1-12)"},
+        {"name": "day_of_year", "type": "int64", "description": "Day of year (1-366)"},
+        {"name": "year", "type": "int64", "description": "Year"},
+        {"name": "all_real", "type": "int64", "description": "Real data flag (always 1)"}
+      ]
+    },
+    "training_dataset.parquet": {
+      "description": "Final training dataset (Gold layer)",
+      "columns": [
+        {"name": "date", "type": "string", "description": "Date"},
+        {"name": "lat", "type": "float64", "description": "Latitude"},
+        {"name": "lon", "type": "float64", "description": "Longitude"},
+        {"name": "sst", "type": "float64", "description": "SST"},
+        {"name": "sst_anomaly", "type": "float64", "description": "SST anomaly from climatology"},
+        {"name": "wave_height", "type": "float64", "description": "Wave height"},
+        {"name": "wave_period", "type": "float64", "description": "Wave period"},
+        {"name": "wind_speed", "type": "float64", "description": "Wind speed"},
+        {"name": "thermal_gradient", "type": "float64", "description": "SST gradient magnitude"},
+        {"name": "upwelling_index", "type": "float64", "description": "Upwelling indicator"},
+        {"name": "fishing_hours", "type": "float64", "description": "Target: fishing hours"},
+        {"name": "is_fishing", "type": "int64", "description": "Target: binary classification"}
+      ]
+    }
+  }
+}

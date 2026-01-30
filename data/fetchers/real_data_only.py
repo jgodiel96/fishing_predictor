@@ -293,12 +293,18 @@ class RealDataFetcher:
     def fetch_real_marine_conditions(
         self,
         start_date: str,
-        end_date: str
+        end_date: str,
+        progress_callback: Optional[callable] = None
     ) -> List[Dict]:
         """
         Fetch REAL wave and wind data from Open-Meteo ERA5.
 
         ERA5 is reanalysis data (real observations + model), not synthetic.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            progress_callback: Optional callback(n) to report progress
         """
         print("\n[MARINE] Fetching REAL wave/wind data from Open-Meteo ERA5...")
 
@@ -311,8 +317,13 @@ class RealDataFetcher:
         total_points = len(lats) * len(lons)
         print(f"[MARINE] Fetching {total_points} grid points...")
 
+        point_count = 0
         for i, lat in enumerate(lats):
             for j, lon in enumerate(lons):
+                point_count += 1
+                # Report progress (only once per grid point)
+                if progress_callback:
+                    progress_callback(1)
                 # Marine data (waves)
                 marine_url = "https://marine-api.open-meteo.com/v1/marine"
                 marine_params = {

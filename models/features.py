@@ -14,6 +14,19 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import math
 
+# Import domain constants
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from domain import (
+    HOTSPOTS,
+    SPECIES_BY_NAME,
+    THRESHOLDS,
+    FEATURE_NAMES,
+    N_FEATURES,
+)
+
 
 @dataclass
 class MarineFeatures:
@@ -75,30 +88,9 @@ class FeatureExtractor:
     4. Current patterns (convergence zones)
     5. Temporal cycles (solunar, seasonal)
     6. Historical patterns (known hotspots)
+
+    Uses centralized domain constants from domain.py
     """
-
-    # Optimal ranges based on Humboldt Current research
-    SST_OPTIMAL = {'min': 14.0, 'max': 24.0, 'center': 17.5}
-    SST_SPECIES = {
-        'Cabrilla': (16, 19),
-        'Corvina': (15, 18),
-        'Robalo': (17, 21),
-        'Anchoveta': (14, 22)
-    }
-
-    # Thermal front thresholds (Belkin-O'Reilly 2009)
-    GRADIENT_THRESHOLD = 0.04  # °C/km for weak front
-    STRONG_FRONT_THRESHOLD = 0.1  # °C/km for strong front
-
-    # Historical hotspots (Tacna-Ilo region)
-    HOTSPOTS = [
-        (-17.70, -71.35, "Punta Coles", 1.3),
-        (-17.78, -71.14, "Pozo Redondo", 1.2),
-        (-17.82, -71.10, "Punta Blanca", 1.25),
-        (-17.93, -70.99, "Ite", 1.15),
-        (-18.02, -70.93, "Vila Vila", 1.2),
-        (-18.12, -70.86, "Boca del Rio", 1.1),
-    ]
 
     def __init__(self):
         self.features_cache: List[MarineFeatures] = []
@@ -106,28 +98,25 @@ class FeatureExtractor:
         self.sst_field: Dict[Tuple[float, float], float] = {}
         self.current_field: Dict[Tuple[float, float], Tuple[float, float]] = {}
 
-        # 32 advanced features
-        self.feature_names = [
-            # SST features (6)
-            'sst', 'sst_anomaly', 'sst_optimal_score', 'sst_species_score',
-            'sst_variability', 'sst_trend',
-            # Thermal front features (5)
-            'gradient_magnitude', 'gradient_direction_sin', 'gradient_direction_cos',
-            'is_thermal_front', 'front_intensity',
-            # Current features (6)
-            'current_speed', 'current_u', 'current_v',
-            'current_convergence', 'current_shear', 'current_toward_coast',
-            # Wave features (3)
-            'wave_height', 'wave_period', 'wave_favorable',
-            # Upwelling features (3)
-            'upwelling_index', 'ekman_transport', 'upwelling_favorable',
-            # Spatial features (4)
-            'distance_to_coast', 'depth_proxy', 'coastal_zone', 'offshore_zone',
-            # Historical features (2)
-            'hotspot_distance', 'hotspot_similarity',
-            # Temporal features (3)
-            'hour_score', 'moon_score', 'season_score'
-        ]
+        # Use centralized feature names from domain.py
+        self.feature_names = list(FEATURE_NAMES)
+
+    # Domain constants - delegated to domain.py
+    @property
+    def SST_OPTIMAL(self) -> Dict[str, float]:
+        return {
+            'min': THRESHOLDS.sst_optimal_min,
+            'max': THRESHOLDS.sst_optimal_max,
+            'center': THRESHOLDS.sst_optimal_center
+        }
+
+    @property
+    def GRADIENT_THRESHOLD(self) -> float:
+        return THRESHOLDS.gradient_weak
+
+    @property
+    def STRONG_FRONT_THRESHOLD(self) -> float:
+        return THRESHOLDS.gradient_strong
 
     def extract_from_marine_points(
         self,
@@ -349,13 +338,8 @@ class FeatureExtractor:
         return 0.1  # Penalty for out of range
 
     def _sst_species_score(self, sst: float) -> float:
-        """Score based on species-specific optimal SST."""
-        scores = []
-        for species, (tmin, tmax) in self.SST_SPECIES.items():
-            if tmin <= sst <= tmax:
-                center = (tmin + tmax) / 2
-                score = 1.0 - abs(sst - center) / (tmax - tmin)
-                scores.append(score)
+        """Score based on species-specific optimal SST using domain.py species data."""
+        scores = [sp.temp_score(sst) for sp in SPECIES_BY_NAME.values()]
         return max(scores) if scores else 0.1
 
     # === Thermal Front Detection (Belkin-O'Reilly) ===
@@ -534,19 +518,19 @@ class FeatureExtractor:
     # === Historical Patterns ===
 
     def _analyze_hotspots(self, lat: float, lon: float, sst: float) -> Tuple[float, float]:
-        """Analyze proximity and similarity to historical hotspots."""
+        """Analyze proximity and similarity to historical hotspots from domain.py."""
         min_dist = float('inf')
         max_similarity = 0.0
 
-        for h_lat, h_lon, name, bonus in self.HOTSPOTS:
-            dist = self._haversine(lat, lon, h_lat, h_lon)
+        for hotspot in HOTSPOTS:
+            dist = hotspot.distance_to(lat, lon)
             min_dist = min(min_dist, dist)
 
             # Similarity based on distance and SST match
-            if dist < 10000:  # Within 10km
-                proximity = 1 - (dist / 10000)
+            if dist < 10_000:  # Within 10km
+                proximity = 1 - (dist / 10_000)
                 sst_match = self._sst_optimal_score(sst)
-                similarity = proximity * sst_match * bonus
+                similarity = proximity * sst_match * hotspot.bonus_factor
                 max_similarity = max(max_similarity, similarity)
 
         return min_dist, max_similarity

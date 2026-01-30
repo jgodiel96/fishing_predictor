@@ -1,0 +1,224 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-01-29",
+  "description": "Documentation of all data sources used in the Fishing Predictor",
+  "sources": {
+    "gfw": {
+      "name": "Global Fishing Watch",
+      "type": "fishing_activity",
+      "description": "AIS-based fishing activity detection using machine learning algorithms",
+      "url": "https://globalfishingwatch.org/",
+      "api_endpoint": "https://gateway.api.globalfishingwatch.org/v3/4wings/report",
+      "authentication": {
+        "type": "bearer_token",
+        "env_var": "GFW_API_KEY",
+        "registration_url": "https://globalfishingwatch.org/our-apis/"
+      },
+      "data_format": "JSON -> Parquet",
+      "temporal_resolution": "daily",
+      "spatial_resolution": "0.1 degrees (~11km)",
+      "coverage": {
+        "temporal": "2012-present",
+        "spatial": "Global oceans"
+      },
+      "fields": [
+        {"name": "date", "type": "string", "description": "Date of observation (YYYY-MM-DD)"},
+        {"name": "lat", "type": "float", "description": "Latitude in decimal degrees"},
+        {"name": "lon", "type": "float", "description": "Longitude in decimal degrees"},
+        {"name": "fishing_hours", "type": "float", "description": "Total fishing hours detected"},
+        {"name": "vessel_id", "type": "string", "description": "Anonymized vessel identifier"},
+        {"name": "flag_state", "type": "string", "description": "Vessel flag state (ISO 3166-1 alpha-3)"},
+        {"name": "gear_type", "type": "string", "description": "Fishing gear type (e.g., purse_seines, trawlers)"}
+      ],
+      "quality": {
+        "reliability": "high",
+        "notes": "Based on AIS transponder data; may miss vessels with AIS off"
+      },
+      "license": "CC BY-NC 4.0 for research use"
+    },
+    "open_meteo": {
+      "name": "Open-Meteo ERA5",
+      "type": "marine_conditions",
+      "description": "Reanalysis data from ECMWF ERA5 via Open-Meteo API",
+      "url": "https://open-meteo.com/",
+      "api_endpoint": "https://marine-api.open-meteo.com/v1/marine",
+      "authentication": {
+        "type": "none",
+        "notes": "Public API with rate limits"
+      },
+      "data_format": "JSON -> Parquet",
+      "temporal_resolution": "daily (aggregated from hourly)",
+      "spatial_resolution": "0.25 degrees (~28km)",
+      "coverage": {
+        "temporal": "1940-present (ERA5)",
+        "spatial": "Global oceans"
+      },
+      "fields": [
+        {"name": "date", "type": "string", "description": "Date (YYYY-MM-DD)"},
+        {"name": "lat", "type": "float", "description": "Latitude"},
+        {"name": "lon", "type": "float", "description": "Longitude"},
+        {"name": "wave_height", "type": "float", "description": "Max significant wave height (m)"},
+        {"name": "wave_period", "type": "float", "description": "Peak wave period (s)"},
+        {"name": "wave_direction", "type": "float", "description": "Dominant wave direction (degrees)"},
+        {"name": "wind_speed", "type": "float", "description": "Wind speed at 10m (m/s)"},
+        {"name": "wind_direction", "type": "float", "description": "Wind direction (degrees)"}
+      ],
+      "quality": {
+        "reliability": "high",
+        "notes": "ERA5 is considered gold standard for reanalysis data"
+      },
+      "license": "Open data (Copernicus Climate Data Store license)"
+    },
+    "noaa_sst": {
+      "name": "NOAA OISST",
+      "type": "sea_surface_temperature",
+      "description": "Optimum Interpolation Sea Surface Temperature v2.1",
+      "url": "https://www.ncei.noaa.gov/products/optimum-interpolation-sst",
+      "api_endpoint": "https://coastwatch.pfeg.noaa.gov/erddap/griddap/ncdcOisst21Agg_LonPM180",
+      "authentication": {
+        "type": "none",
+        "notes": "Public ERDDAP API"
+      },
+      "data_format": "JSON/NetCDF -> Parquet",
+      "temporal_resolution": "daily",
+      "spatial_resolution": "0.25 degrees (~28km)",
+      "coverage": {
+        "temporal": "1981-present",
+        "spatial": "Global"
+      },
+      "fields": [
+        {"name": "date", "type": "string", "description": "Date (YYYY-MM-DD)"},
+        {"name": "lat", "type": "float", "description": "Latitude"},
+        {"name": "lon", "type": "float", "description": "Longitude"},
+        {"name": "sst", "type": "float", "description": "Sea surface temperature (Celsius)"}
+      ],
+      "quality": {
+        "reliability": "high",
+        "notes": "Blended satellite + in-situ observations"
+      },
+      "license": "Public domain (NOAA)"
+    },
+    "earthdata_sst": {
+      "name": "NASA MUR SST",
+      "type": "sea_surface_temperature",
+      "description": "Multi-scale Ultra-high Resolution SST Analysis",
+      "url": "https://podaac.jpl.nasa.gov/dataset/MUR-JPL-L4-GLOB-v4.1",
+      "api_endpoint": "https://cmr.earthdata.nasa.gov/search/granules.json",
+      "authentication": {
+        "type": "basic",
+        "env_vars": ["EARTHDATA_USER", "EARTHDATA_PASS"],
+        "registration_url": "https://urs.earthdata.nasa.gov/users/new"
+      },
+      "data_format": "NetCDF -> Parquet",
+      "temporal_resolution": "daily",
+      "spatial_resolution": "0.01 degrees (~1km)",
+      "coverage": {
+        "temporal": "2002-present",
+        "spatial": "Global"
+      },
+      "fields": [
+        {"name": "date", "type": "string", "description": "Date (YYYY-MM-DD)"},
+        {"name": "lat", "type": "float", "description": "Latitude"},
+        {"name": "lon", "type": "float", "description": "Longitude"},
+        {"name": "sst", "type": "float", "description": "Sea surface temperature (Celsius)"}
+      ],
+      "quality": {
+        "reliability": "very_high",
+        "notes": "Highest resolution global SST product available"
+      },
+      "license": "Public domain (NASA)"
+    },
+    "copernicus_sst": {
+      "name": "Copernicus Marine OSTIA",
+      "type": "sea_surface_temperature",
+      "description": "Operational Sea Surface Temperature and Ice Analysis",
+      "url": "https://marine.copernicus.eu/",
+      "api_endpoint": "copernicusmarine (Python library)",
+      "authentication": {
+        "type": "basic",
+        "env_vars": ["COPERNICUS_USER", "COPERNICUS_PASS"],
+        "registration_url": "https://data.marine.copernicus.eu/register"
+      },
+      "data_format": "NetCDF -> Parquet",
+      "temporal_resolution": "daily",
+      "spatial_resolution": "0.05 degrees (~5km)",
+      "coverage": {
+        "temporal": "1982-present",
+        "spatial": "Global"
+      },
+      "fields": [
+        {"name": "date", "type": "string", "description": "Date (YYYY-MM-DD)"},
+        {"name": "lat", "type": "float", "description": "Latitude"},
+        {"name": "lon", "type": "float", "description": "Longitude"},
+        {"name": "sst", "type": "float", "description": "Sea surface temperature (Celsius)"}
+      ],
+      "quality": {
+        "reliability": "high",
+        "notes": "Good backup for NOAA SST"
+      },
+      "license": "Copernicus Marine Service license (free for research)"
+    },
+    "imarpe": {
+      "name": "IMARPE Climatology",
+      "type": "sea_surface_temperature",
+      "description": "Climatological SST values for Peruvian coast from IMARPE research",
+      "url": "https://www.imarpe.gob.pe/",
+      "api_endpoint": null,
+      "authentication": {
+        "type": "none",
+        "notes": "Hardcoded climatological values based on published research"
+      },
+      "data_format": "Internal lookup table",
+      "temporal_resolution": "monthly_climatology",
+      "spatial_resolution": "regional",
+      "coverage": {
+        "temporal": "Climatological average (1981-2010)",
+        "spatial": "Peruvian coast"
+      },
+      "fields": [
+        {"name": "month", "type": "int", "description": "Month (1-12)"},
+        {"name": "sst", "type": "float", "description": "Climatological SST (Celsius)"}
+      ],
+      "quality": {
+        "reliability": "medium",
+        "notes": "Fallback when satellite data unavailable; represents average conditions"
+      },
+      "license": "Public research"
+    },
+    "user_sightings": {
+      "name": "User Sightings",
+      "type": "fishing_activity",
+      "description": "User-reported fishing activity and catches",
+      "url": null,
+      "api_endpoint": null,
+      "authentication": {
+        "type": "none",
+        "notes": "Manual entry"
+      },
+      "data_format": "JSONL (append-only)",
+      "temporal_resolution": "event-based",
+      "spatial_resolution": "point",
+      "coverage": {
+        "temporal": "User-dependent",
+        "spatial": "Study area"
+      },
+      "fields": [
+        {"name": "date", "type": "string", "description": "Date of sighting"},
+        {"name": "lat", "type": "float", "description": "Latitude"},
+        {"name": "lon", "type": "float", "description": "Longitude"},
+        {"name": "fishing_hours", "type": "float", "description": "Estimated fishing duration"},
+        {"name": "notes", "type": "string", "description": "User notes"}
+      ],
+      "quality": {
+        "reliability": "variable",
+        "notes": "Dependent on user accuracy"
+      },
+      "license": "User-contributed"
+    }
+  },
+  "source_priority": {
+    "sst": ["earthdata_sst", "copernicus_sst", "noaa_sst", "imarpe"],
+    "fishing": ["gfw", "user_sightings"],
+    "marine": ["open_meteo"]
+  }
+}

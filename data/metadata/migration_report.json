@@ -1,0 +1,26 @@
+{
+  "migration_timestamp": "2026-01-29T22:56:39.960535+00:00",
+  "source_database": "/Users/jorgegodiel/Documents/codes/Proyecto_pesca/fishing_predictor/data/real_only/real_data_100.db",
+  "stats": {
+    "marine": {
+      "files_created": 73,
+      "records_migrated": 216354
+    },
+    "fishing": {
+      "files_created": 2,
+      "records_migrated": 158,
+      "synthetic_excluded": 0
+    },
+    "user_sightings": {
+      "records_migrated": 1
+    }
+  },
+  "architecture": "Bronze/Silver/Gold",
+  "notes": [
+    "Synthetic historical_* data was excluded from migration",
+    "All GFW fishing data migrated to data/raw/gfw/",
+    "All Open-Meteo marine data migrated to data/raw/open_meteo/",
+    "User sightings migrated to data/raw/user_sightings/sightings.jsonl",
+    "Original database preserved at data/real_only/real_data_100.db"
+  ]
+}

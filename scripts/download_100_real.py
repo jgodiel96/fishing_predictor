@@ -23,25 +23,113 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import json
 import sqlite3
+import time
 from datetime import datetime, timedelta
+from typing import Callable, Optional
 from data.fetchers.real_data_only import RealDataFetcher, RealDataError
 
 
-def check_gfw_api_key():
+# =============================================================================
+# PROGRESS BAR (No dependencies - pure ASCII)
+# =============================================================================
+
+class ProgressBar:
+    """
+    CLI progress bar without external dependencies.
+
+    Example:
+        [SST]     ████████████████░░░░░░░░░░░░░░░░  52% |  50/96 pts
+    """
+
+    def __init__(
+        self,
+        total: int,
+        prefix: str = "",
+        width: int = 32,
+        fill: str = "█",
+        empty: str = "░"
+    ):
+        self.total = max(1, total)
+        self.prefix = prefix
+        self.width = width
+        self.fill = fill
+        self.empty = empty
+        self.current = 0
+        self.start_time = time.time()
+
+    def update(self, n: int = 1):
+        """Update progress by n steps."""
+        prev = self.current
+        self.current = min(self.current + n, self.total)
+        # Only render if progress actually changed
+        if self.current != prev:
+            self._render()
+
+    def set(self, value: int):
+        """Set progress to specific value."""
+        self.current = min(value, self.total)
+        self._render()
+
+    def _render(self):
+        """Render the progress bar to terminal."""
+        percent = self.current / self.total
+        filled = int(self.width * percent)
+        bar = self.fill * filled + self.empty * (self.width - filled)
+
+        # Calculate ETA
+        elapsed = time.time() - self.start_time
+        if self.current > 0 and percent < 1:
+            eta = elapsed / percent * (1 - percent)
+            eta_str = f"ETA {eta:.0f}s"
+        elif percent >= 1:
+            eta_str = f"Done {elapsed:.1f}s"
+        else:
+            eta_str = "..."
+
+        # Format: [PREFIX] ████░░░░  52% | 50/96 | ETA 5s
+        line = f"\r{self.prefix} {bar} {percent:>3.0%} | {self.current:>4}/{self.total:<4} | {eta_str}"
+
+        sys.stdout.write(line)
+        sys.stdout.flush()
+
+        if self.current >= self.total:
+            sys.stdout.write("\n")
+
+    def finish(self):
+        """Complete the progress bar."""
+        self.current = self.total
+        self._render()
+
+
+def print_header(title: str, char: str = "=", width: int = 60):
+    """Print a formatted header."""
+    print(f"\n{char * width}")
+    print(f"  {title}")
+    print(f"{char * width}")
+
+
+def print_status(icon: str, message: str):
+    """Print a status message with icon."""
+    print(f"{icon}  {message}")
+
+
+# =============================================================================
+# API KEY CHECK
+# =============================================================================
+
+def check_gfw_api_key() -> bool:
     """Check if GFW API key is set."""
     api_key = os.environ.get('GFW_API_KEY', '')
 
     if not api_key:
-        print("=" * 60)
-        print("⚠️  GLOBAL FISHING WATCH API KEY NOT SET")
-        print("=" * 60)
+        print_header("⚠️  GLOBAL FISHING WATCH API KEY NOT SET", "!")
         print()
         print("Para obtener datos de pesca REALES, necesitas una API key gratuita:")
         print()
-        print("1. Ve a: https://globalfishingwatch.org/our-apis/")
-        print("2. Haz click en 'Request API Access'")
-        print("3. Completa el formulario (es gratis para investigación)")
-        print("4. Recibirás la API key por email")
+        print("  1. Ve a: https://globalfishingwatch.org/our-apis/")
+        print("  2. Haz click en 'Request API Access'")
+        print("  3. Completa el formulario (es gratis para investigación)")
+        print("  4. Recibirás la API key por email")
         print()
         print("Una vez tengas la key, configúrala así:")
         print()
@@ -54,6 +142,10 @@ def check_gfw_api_key():
     return True
 
 
+# =============================================================================
+# DATA DOWNLOAD WITH PROGRESS
+# =============================================================================
+
 def download_real_data(months: int = 6):
     """Download real data for specified number of months."""
 
@@ -63,16 +155,14 @@ def download_real_data(months: int = 6):
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
 
-    print("=" * 60)
-    print("DESCARGA DE DATOS 100% REALES")
-    print("=" * 60)
-    print(f"Período: {start_str} a {end_str}")
-    print(f"Región: Tacna-Ilo, Perú")
+    print_header("DESCARGA DE DATOS 100% REALES")
+    print(f"  Período: {start_str} a {end_str}")
+    print(f"  Región:  Tacna-Ilo, Perú (-18.3° a -17.3°S)")
     print()
-    print("Fuentes de datos REALES:")
-    print("  - SST: NOAA NCEI (satélite OISST)")
-    print("  - Olas/Viento: Open-Meteo (ERA5 reanálisis)")
-    print("  - Pesca: Global Fishing Watch (AIS)")
+    print("  Fuentes de datos REALES:")
+    print("    • SST: NOAA NCEI (satélite OISST)")
+    print("    • Olas/Viento: Open-Meteo (ERA5 reanálisis)")
+    print("    • Pesca: Global Fishing Watch (AIS)")
     print("=" * 60)
 
     fetcher = RealDataFetcher(cache_dir="data/real_only")
@@ -89,43 +179,66 @@ def download_real_data(months: int = 6):
         }
     }
 
-    # 1. Download SST
-    print("\n" + "=" * 40)
-    print("PASO 1/3: SST SATELITAL")
-    print("=" * 40)
+    # =========================================================================
+    # PASO 1: SST SATELITAL
+    # =========================================================================
+    print_header("PASO 1/3: SST SATELITAL", "-", 50)
+
+    progress = ProgressBar(total=3, prefix="[SST]    ")
 
     sst_available = False
     try:
+        progress.update(1)  # Iniciando
         sst_data = fetcher.fetch_real_sst(start_str, end_str)
+        progress.update(1)  # Descargando
         all_data['sst'] = sst_data
         all_data['metadata']['sources'].append('noaa_ncei_sst')
-        print(f"✅ SST: {len(sst_data)} registros reales")
+        progress.finish()
+        print_status("✅", f"SST: {len(sst_data)} registros satelitales")
         sst_available = True
     except RealDataError as e:
-        print(f"⚠️  SST Warning: {e}")
-        print("[INFO] Continuando sin SST satelital - se usará climatología IMARPE")
+        progress.finish()
+        print_status("⚠️ ", f"SST: {e}")
+        print_status("ℹ️ ", "Continuando con climatología IMARPE")
 
-    # 2. Download Marine conditions
-    print("\n" + "=" * 40)
-    print("PASO 2/3: CONDICIONES MARINAS (ERA5)")
-    print("=" * 40)
+    # =========================================================================
+    # PASO 2: CONDICIONES MARINAS (ERA5)
+    # =========================================================================
+    print_header("PASO 2/3: CONDICIONES MARINAS (ERA5)", "-", 50)
+
+    # Grid size for progress - calculate exact number of points
+    import numpy as np
+    lats = np.arange(fetcher.REGION['lat_min'], fetcher.REGION['lat_max'] + 0.1, fetcher.GRID_RESOLUTION)
+    lons = np.arange(fetcher.REGION['lon_min'], fetcher.REGION['lon_max'] + 0.1, fetcher.GRID_RESOLUTION)
+    grid_points = len(lats) * len(lons)
+
+    progress = ProgressBar(total=grid_points, prefix="[MARINE] ")
 
     try:
-        marine_data = fetcher.fetch_real_marine_conditions(start_str, end_str)
+        marine_data = fetcher.fetch_real_marine_conditions(
+            start_str, end_str,
+            progress_callback=lambda n: progress.update(n)
+        )
+        progress.finish()
         all_data['marine'] = marine_data
         all_data['metadata']['sources'].append('open_meteo_era5')
-        print(f"✅ Marine: {len(marine_data)} registros reales")
+        print_status("✅", f"Marine: {len(marine_data)} registros ERA5")
     except RealDataError as e:
-        print(f"❌ Marine Error: {e}")
+        progress.finish()
+        print_status("❌", f"Marine Error: {e}")
         return None
 
-    # 3. Download Fishing activity
-    print("\n" + "=" * 40)
-    print("PASO 3/3: ACTIVIDAD PESQUERA (GFW)")
-    print("=" * 40)
+    # =========================================================================
+    # PASO 3: ACTIVIDAD PESQUERA (GFW)
+    # =========================================================================
+    print_header("PASO 3/3: ACTIVIDAD PESQUERA (GFW)", "-", 50)
+
+    progress = ProgressBar(total=3, prefix="[FISHING]")
 
     try:
+        progress.update(1)  # Conectando
         fishing_events = fetcher.fetch_real_fishing_activity(start_str, end_str)
+        progress.update(1)  # Procesando
         all_data['fishing'] = [
             {
                 'date': e.date,
@@ -140,71 +253,82 @@ def download_real_data(months: int = 6):
             for e in fishing_events
         ]
         all_data['metadata']['sources'].append('gfw_ais')
-        print(f"✅ Fishing: {len(fishing_events)} eventos reales")
+        progress.finish()
+        print_status("✅", f"Fishing: {len(fishing_events)} eventos AIS")
     except RealDataError as e:
-        print(f"❌ Fishing Error: {e}")
+        progress.finish()
+        print_status("❌", f"Fishing Error: {e}")
         print()
         print("Sin datos de pesca reales, no podemos entrenar el modelo supervisado.")
         print("Por favor configura GFW_API_KEY y vuelve a ejecutar.")
         return None
 
-    # Save to database
-    print("\n" + "=" * 40)
-    print("GUARDANDO DATOS")
-    print("=" * 40)
+    # =========================================================================
+    # GUARDAR DATOS
+    # =========================================================================
+    print_header("GUARDANDO DATOS", "-", 50)
 
+    progress = ProgressBar(total=4, prefix="[SAVE]   ")
+
+    progress.update(1)  # SST
+    progress.update(1)  # Marine
+    progress.update(1)  # Fishing
     db_path = save_real_data_to_db(all_data, fetcher.cache_dir)
+    progress.finish()
 
-    # Summary
-    print("\n" + "=" * 60)
-    print("✅ DESCARGA COMPLETADA - 100% DATOS REALES")
-    print("=" * 60)
+    # =========================================================================
+    # RESUMEN FINAL
+    # =========================================================================
+    print_header("✅ DESCARGA COMPLETADA - 100% DATOS REALES")
     print()
-    print(f"Base de datos: {db_path}")
+    print(f"  📁 Base de datos: {db_path}")
     print()
-    print("Estadísticas:")
-    print(f"  - SST satelital: {len(all_data['sst'])} registros")
-    print(f"  - Condiciones marinas: {len(all_data['marine'])} registros")
-    print(f"  - Eventos de pesca: {len(all_data['fishing'])} eventos")
+    print("  📊 Estadísticas:")
+    print(f"      • SST satelital:       {len(all_data['sst']):>6} registros")
+    print(f"      • Condiciones marinas: {len(all_data['marine']):>6} registros")
+    print(f"      • Eventos de pesca:    {len(all_data['fishing']):>6} eventos")
     print()
-    print("Fuentes verificadas:")
+    print("  ✓ Fuentes verificadas:")
     for source in all_data['metadata']['sources']:
-        print(f"  ✓ {source}")
+        print(f"      • {source}")
     print()
-    print("Para ejecutar el análisis con estos datos:")
-    print("  python main.py --supervised")
+    print("  🚀 Para ejecutar el análisis:")
+    print("      python main.py --supervised")
+    print()
 
     return db_path
 
 
 def save_real_data_to_db(data: dict, cache_dir: Path) -> Path:
-    """Save real data to SQLite database."""
+    """
+    Save real data to SQLite database - ACCUMULATIVE MODE.
+
+    New data is ADDED to existing data, not replaced.
+    Uses UNIQUE constraints to avoid duplicates.
+    """
     db_path = cache_dir / "real_data_100.db"
 
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    # Drop old tables
-    cursor.execute('DROP TABLE IF EXISTS sst')
-    cursor.execute('DROP TABLE IF EXISTS marine')
-    cursor.execute('DROP TABLE IF EXISTS fishing')
-    cursor.execute('DROP TABLE IF EXISTS training')
-    cursor.execute('DROP TABLE IF EXISTS metadata')
+    # NO DROP TABLES - We accumulate data
+    # Create tables only if they don't exist
 
-    # Create tables
+    # Create tables IF NOT EXISTS with UNIQUE constraints to avoid duplicates
     cursor.execute('''
-        CREATE TABLE sst (
+        CREATE TABLE IF NOT EXISTS sst (
             id INTEGER PRIMARY KEY,
             date TEXT,
             lat REAL,
             lon REAL,
             sst REAL,
-            source TEXT
+            source TEXT,
+            UNIQUE(date, lat, lon)
         )
     ''')
 
     cursor.execute('''
-        CREATE TABLE marine (
+        CREATE TABLE IF NOT EXISTS marine (
             id INTEGER PRIMARY KEY,
             date TEXT,
             lat REAL,
@@ -214,12 +338,13 @@ def save_real_data_to_db(data: dict, cache_dir: Path) -> Path:
             wave_direction REAL,
             wind_speed REAL,
             wind_direction REAL,
-            source TEXT
+            source TEXT,
+            UNIQUE(date, lat, lon)
         )
     ''')
 
     cursor.execute('''
-        CREATE TABLE fishing (
+        CREATE TABLE IF NOT EXISTS fishing (
             id INTEGER PRIMARY KEY,
             date TEXT,
             lat REAL,
@@ -228,12 +353,13 @@ def save_real_data_to_db(data: dict, cache_dir: Path) -> Path:
             vessel_id TEXT,
             flag_state TEXT,
             gear_type TEXT,
-            source TEXT
+            source TEXT,
+            UNIQUE(date, lat, lon, vessel_id)
         )
     ''')
 
     cursor.execute('''
-        CREATE TABLE training (
+        CREATE TABLE IF NOT EXISTS training (
             id INTEGER PRIMARY KEY,
             date TEXT,
             lat REAL,
@@ -246,61 +372,64 @@ def save_real_data_to_db(data: dict, cache_dir: Path) -> Path:
             fishing_hours REAL,
             is_fishing INTEGER,
             month INTEGER,
-            all_real INTEGER DEFAULT 1
+            all_real INTEGER DEFAULT 1,
+            UNIQUE(date, lat, lon)
         )
     ''')
 
     cursor.execute('''
-        CREATE TABLE metadata (
+        CREATE TABLE IF NOT EXISTS metadata (
             key TEXT PRIMARY KEY,
             value TEXT
         )
     ''')
 
-    # Insert SST
+    # Insert SST (OR IGNORE duplicates)
+    new_sst = 0
     for record in data['sst']:
         cursor.execute(
-            'INSERT INTO sst (date, lat, lon, sst, source) VALUES (?, ?, ?, ?, ?)',
+            'INSERT OR IGNORE INTO sst (date, lat, lon, sst, source) VALUES (?, ?, ?, ?, ?)',
             (record['date'], record['lat'], record['lon'], record['sst'], record['sst_source'])
         )
+        new_sst += cursor.rowcount
 
-    # Insert Marine
+    # Insert Marine (OR IGNORE duplicates)
+    new_marine = 0
     for record in data['marine']:
         cursor.execute(
-            '''INSERT INTO marine (date, lat, lon, wave_height, wave_period, wave_direction, wind_speed, wind_direction, source)
+            '''INSERT OR IGNORE INTO marine (date, lat, lon, wave_height, wave_period, wave_direction, wind_speed, wind_direction, source)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
             (record['date'], record['lat'], record['lon'],
              record.get('wave_height'), record.get('wave_period'), record.get('wave_direction'),
              record.get('wind_speed'), record.get('wind_direction'), record['data_source'])
         )
+        new_marine += cursor.rowcount
 
-    # Insert Fishing
+    # Insert Fishing (OR IGNORE duplicates)
+    new_fishing = 0
     for event in data['fishing']:
         cursor.execute(
-            '''INSERT INTO fishing (date, lat, lon, fishing_hours, vessel_id, flag_state, gear_type, source)
+            '''INSERT OR IGNORE INTO fishing (date, lat, lon, fishing_hours, vessel_id, flag_state, gear_type, source)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
             (event['date'], event['lat'], event['lon'], event['fishing_hours'],
              event.get('vessel_id'), event.get('flag_state'), event.get('gear_type'), event['source'])
         )
+        new_fishing += cursor.rowcount
 
     # Build training table by merging
-    # Create SST lookup - use satellite data if available, otherwise IMARPE climatology
-    sst_lookup = {}
     use_climatology = len(data['sst']) == 0
+    sst_lookup = {}
 
     if not use_climatology:
         for r in data['sst']:
             key = (r['date'], round(r['lat'], 1), round(r['lon'], 1))
             sst_lookup[key] = r['sst']
-        print("[INFO] Using satellite SST data")
-    else:
-        print("[INFO] Using IMARPE climatology for SST (satellite data not available)")
 
     # IMARPE SST climatology by month for Tacna-Ilo region
     SST_CLIMATOLOGY = {
-        1: 19.5, 2: 20.5, 3: 20.0, 4: 18.5,  # Summer/Fall
-        5: 17.0, 6: 16.0, 7: 15.5, 8: 15.0,  # Winter (upwelling peak)
-        9: 15.5, 10: 16.5, 11: 17.5, 12: 18.5  # Spring
+        1: 19.5, 2: 20.5, 3: 20.0, 4: 18.5,
+        5: 17.0, 6: 16.0, 7: 15.5, 8: 15.0,
+        9: 15.5, 10: 16.5, 11: 17.5, 12: 18.5
     }
 
     # Create fishing lookup
@@ -317,11 +446,9 @@ def save_real_data_to_db(data: dict, cache_dir: Path) -> Path:
     for record in data['marine']:
         key = (record['date'], round(record['lat'], 1), round(record['lon'], 1))
 
-        # Get SST from satellite or climatology
         if use_climatology:
             month = int(record['date'][5:7])
             sst = SST_CLIMATOLOGY.get(month, 17.0)
-            # Add small variation based on location
             lat_effect = (record['lat'] - (-18.3)) * 0.3
             sst += lat_effect
         else:
@@ -334,7 +461,7 @@ def save_real_data_to_db(data: dict, cache_dir: Path) -> Path:
         month = int(record['date'][5:7])
 
         cursor.execute(
-            '''INSERT INTO training (date, lat, lon, sst, wave_height, wave_period, wind_speed, wind_direction, fishing_hours, is_fishing, month)
+            '''INSERT OR IGNORE INTO training (date, lat, lon, sst, wave_height, wave_period, wind_speed, wind_direction, fishing_hours, is_fishing, month)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
             (record['date'], record['lat'], record['lon'], sst,
              record.get('wave_height'), record.get('wave_period'),
@@ -342,36 +469,51 @@ def save_real_data_to_db(data: dict, cache_dir: Path) -> Path:
              fishing_hours, is_fishing, month)
         )
 
-        training_count += 1
-        positive_count += is_fishing
+        if cursor.rowcount > 0:
+            training_count += 1
+            positive_count += is_fishing
 
-    # Metadata
+    # Metadata - use INSERT OR REPLACE to update
     sst_source = 'noaa_ncei_sst' if not use_climatology else 'imarpe_climatology'
     data['metadata']['sources'].append(sst_source)
 
-    cursor.execute("INSERT INTO metadata VALUES ('data_type', 'REAL_DATA')")
-    cursor.execute("INSERT INTO metadata VALUES ('training_samples', ?)", (str(training_count),))
-    cursor.execute("INSERT INTO metadata VALUES ('positive_samples', ?)", (str(positive_count),))
-    cursor.execute("INSERT INTO metadata VALUES ('sources', ?)", (','.join(data['metadata']['sources']),))
-    cursor.execute("INSERT INTO metadata VALUES ('created_at', ?)", (datetime.now().isoformat(),))
-    cursor.execute("INSERT INTO metadata VALUES ('sst_source', ?)", (sst_source,))
+    # Get total counts after insertion
+    cursor.execute("SELECT COUNT(*) FROM training")
+    total_training = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM training WHERE is_fishing = 1")
+    total_positive = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM marine")
+    total_marine = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM fishing")
+    total_fishing = cursor.fetchone()[0]
+    cursor.execute("SELECT MIN(date), MAX(date) FROM training")
+    date_range = cursor.fetchone()
 
-    # Indexes (only create if tables have data)
-    if data['sst']:
-        cursor.execute('CREATE INDEX idx_sst_date ON sst(date)')
-    cursor.execute('CREATE INDEX idx_marine_date ON marine(date)')
-    cursor.execute('CREATE INDEX idx_fishing_date ON fishing(date)')
-    if training_count > 0:
-        cursor.execute('CREATE INDEX idx_training_date ON training(date)')
+    cursor.execute("INSERT OR REPLACE INTO metadata VALUES ('data_type', 'REAL_DATA')")
+    cursor.execute("INSERT OR REPLACE INTO metadata VALUES ('training_samples', ?)", (str(total_training),))
+    cursor.execute("INSERT OR REPLACE INTO metadata VALUES ('positive_samples', ?)", (str(total_positive),))
+    cursor.execute("INSERT OR REPLACE INTO metadata VALUES ('sources', ?)", (','.join(data['metadata']['sources']),))
+    cursor.execute("INSERT OR REPLACE INTO metadata VALUES ('last_updated', ?)", (datetime.now().isoformat(),))
+    cursor.execute("INSERT OR REPLACE INTO metadata VALUES ('sst_source', ?)", (sst_source,))
+    cursor.execute("INSERT OR REPLACE INTO metadata VALUES ('date_range', ?)", (f"{date_range[0]} to {date_range[1]}",))
+
+    # Indexes - CREATE IF NOT EXISTS
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_sst_date ON sst(date)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_marine_date ON marine(date)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_fishing_date ON fishing(date)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_training_date ON training(date)')
 
     conn.commit()
     conn.close()
 
-    print(f"✅ Training samples: {training_count}")
-    if training_count > 0:
-        print(f"✅ Positive (fishing): {positive_count} ({100*positive_count/training_count:.1f}%)")
-    else:
-        print("⚠️  No training samples generated")
+    # Show accumulation stats
+    print_status("📊", f"Nuevos registros agregados:")
+    print(f"       • Marine: +{new_marine} (total: {total_marine})")
+    print(f"       • Fishing: +{new_fishing} (total: {total_fishing})")
+    print(f"       • Training: +{training_count} (total: {total_training})")
+    print_status("📅", f"Rango de datos: {date_range[0]} a {date_range[1]}")
+    if total_training > 0:
+        print_status("🎯", f"Eventos de pesca: {total_positive} ({100*total_positive/total_training:.1f}%)")
 
     return db_path
 

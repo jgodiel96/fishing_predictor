@@ -111,6 +111,9 @@ class AnalysisController:
         self.sss_score: float = 0.5  # Neutral fallback
         self.sla_score: float = 0.5  # Neutral fallback
 
+        # Analysis date (V4) - can be overridden for historical analysis
+        self.analysis_datetime: datetime = datetime.now()
+
         # Historical data for supervised learning
         self.historical_fetcher: Optional['HistoricalDataFetcher'] = None
         self.is_supervised_mode: bool = False
@@ -387,10 +390,11 @@ class AnalysisController:
             if not self.tide_fetcher:
                 self.tide_fetcher = TideFetcher()
 
-            now = datetime.now()
+            # Use analysis datetime (can be current or specified date)
+            now = self.analysis_datetime
             today = now.strftime('%Y-%m-%d')
 
-            # Get tide state for current time
+            # Get tide state for analysis time
             tide_state = self.tide_fetcher.get_tidal_state(now, lat, lon)
 
             # Get today's extremes
@@ -430,7 +434,8 @@ class AnalysisController:
             if not self.physics_fetcher:
                 self.physics_fetcher = CopernicusPhysicsFetcher()
 
-            today = datetime.now().strftime('%Y-%m-%d')
+            # Use analysis date (can be current or specified)
+            today = self.analysis_datetime.strftime('%Y-%m-%d')
 
             # Get SSS (salinity)
             sss_value = self.physics_fetcher.get_sss_for_location(today, lat, lon)
@@ -494,12 +499,27 @@ class AnalysisController:
 
         return output_path
 
-    def run_full_analysis(self, coastline_path: str, output_path: str = "output/analysis_map.html") -> Dict:
-        """Run complete analysis pipeline."""
+    def run_full_analysis(
+        self,
+        coastline_path: str,
+        output_path: str = "output/analysis_map.html",
+        target_date: datetime = None
+    ) -> Dict:
+        """Run complete analysis pipeline.
+
+        Args:
+            coastline_path: Path to coastline GeoJSON file
+            output_path: Output HTML map path
+            target_date: Optional datetime for analysis. If None, uses current datetime.
+        """
+        # Use provided date or current datetime
+        self.analysis_datetime = target_date if target_date else datetime.now()
+        analysis_date_str = self.analysis_datetime.strftime('%Y-%m-%d')
+
         print("=" * 60)
         print("   ANALISIS DE PESCA CON ML")
         print("=" * 60)
-        print(f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n")
+        print(f"Fecha: {self.analysis_datetime.strftime('%d/%m/%Y %H:%M')}\n")
 
         # 1. Load coastline
         print("[1/8] Cargando linea costera...")
@@ -519,7 +539,7 @@ class AnalysisController:
         # 4. Predict anchovy migration
         print("\n[4/8] Prediciendo zonas de anchoveta...")
         anchovy_zones = self.predict_anchovy_migration(
-            target_date=datetime.now().strftime('%Y-%m-%d'),
+            target_date=analysis_date_str,
             target_hour=17
         )
         print(f"      {len(anchovy_zones)} zonas de anchoveta")

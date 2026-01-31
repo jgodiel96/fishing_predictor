@@ -575,8 +575,11 @@ class MapView:
 
             function onDateChange(date) {{
                 console.log('Selected date:', date);
-                // Could trigger AJAX to fetch data for this date
-                alert('Datos para ' + date + '\\n\\nEsta funcion requiere recarga del mapa con los datos del dia seleccionado.');
+                // Map is static HTML - need to regenerate for new date
+                alert('📅 Fecha seleccionada: ' + date + '\\n\\n' +
+                      'Para ver predicciones de esta fecha, ejecuta:\\n\\n' +
+                      'python main.py --date ' + date + '\\n\\n' +
+                      '(El mapa se regenerara con los datos del dia seleccionado)');
             }}
 
             function toggleHeatmap(show) {{

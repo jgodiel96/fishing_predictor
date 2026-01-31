@@ -3,7 +3,8 @@
 Fishing Predictor - Main Entry Point (MVC Architecture)
 
 Usage:
-    python main.py                    # Run full analysis
+    python main.py                    # Run full analysis for today
+    python main.py --date 2026-02-15  # Run analysis for specific date
     python main.py --test             # Run tests
     python main.py --help             # Show help
 """
@@ -17,9 +18,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 
-def run_analysis():
-    """Run full fishing spot analysis."""
+def run_analysis(target_date: str = None):
+    """Run full fishing spot analysis.
+
+    Args:
+        target_date: Optional date string (YYYY-MM-DD) for analysis.
+                    If None, uses current date.
+    """
     from controllers.analysis import AnalysisController
+    from datetime import datetime
 
     controller = AnalysisController()
 
@@ -31,7 +38,18 @@ def run_analysis():
         print("Please ensure the coastline data is downloaded.")
         return 1
 
-    results = controller.run_full_analysis(coastline_path, output_path)
+    # Parse target date if provided
+    analysis_date = None
+    if target_date:
+        try:
+            analysis_date = datetime.strptime(target_date, "%Y-%m-%d")
+            print(f"Ejecutando analisis para fecha: {target_date}")
+        except ValueError:
+            print(f"ERROR: Formato de fecha invalido: {target_date}")
+            print("Use formato YYYY-MM-DD (ejemplo: 2026-02-15)")
+            return 1
+
+    results = controller.run_full_analysis(coastline_path, output_path, target_date=analysis_date)
 
     # Open map in browser
     if results.get('map_path'):
@@ -112,6 +130,12 @@ def main():
         default='output/fishing_analysis_ml.html',
         help='Output map path'
     )
+    parser.add_argument(
+        '--date',
+        type=str,
+        default=None,
+        help='Target date for analysis (YYYY-MM-DD). Default: today'
+    )
 
     args = parser.parse_args()
 
@@ -122,7 +146,7 @@ def main():
     elif args.supervised:
         return run_supervised_analysis()
     else:
-        return run_analysis()
+        return run_analysis(target_date=args.date)
 
 
 if __name__ == "__main__":

@@ -492,6 +492,15 @@ class AnalysisController:
             except Exception as e:
                 print(f"[WARN] No se pudo agregar timeline: {e}")
 
+        # Add multi-day predictions for interactive date switching
+        try:
+            print("[INFO] Generando predicciones para 7 dias...")
+            multiday_data = self.generate_multiday_predictions(days=7)
+            self.map_view.add_multiday_panel(multiday_data)
+            print(f"[OK] {len(multiday_data)} dias de predicciones generados")
+        except Exception as e:
+            print(f"[WARN] No se pudo agregar panel multi-dia: {e}")
+
         self.map_view.finalize()
 
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -583,6 +592,110 @@ class AnalysisController:
             'conditions': conditions,
             'map_path': map_path
         }
+
+    def generate_multiday_predictions(self, days: int = 7) -> List[Dict]:
+        """
+        Generate predictions for multiple days for interactive date switching.
+
+        Args:
+            days: Number of days to generate (default: 7)
+
+        Returns:
+            List of daily prediction summaries
+        """
+        base_date = self.analysis_datetime
+        predictions = []
+
+        # Reference location for tide/physics calculations
+        ref_lat = -17.7  # Approximate center of fishing area
+        ref_lon = -71.3
+
+        for day_offset in range(days):
+            target_dt = base_date + timedelta(days=day_offset)
+            target_date_str = target_dt.strftime('%Y-%m-%d')
+            day_name = ['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom'][target_dt.weekday()]
+
+            # Calculate tide score for this day
+            tide_score = 0.5
+            tide_phase = 'unknown'
+            if TIDES_AVAILABLE and self.tide_fetcher:
+                try:
+                    # Get tide at 6 AM (typical fishing hour)
+                    morning_dt = target_dt.replace(hour=6, minute=0)
+                    tide_state = self.tide_fetcher.get_tidal_state(morning_dt, ref_lat, ref_lon)
+                    if hasattr(tide_state, '_asdict'):
+                        tide_dict = tide_state._asdict()
+                        tide_score = tide_dict.get('fishing_score', 0.5)
+                        tide_phase = tide_dict.get('phase', 'unknown')
+                except Exception:
+                    pass
+
+            # Calculate SSS/SLA scores for this day
+            sss_score = 0.5
+            sla_score = 0.5
+            if PHYSICS_AVAILABLE and self.physics_fetcher:
+                try:
+                    sss_val = self.physics_fetcher.get_sss_for_location(target_date_str, ref_lat, ref_lon)
+                    if sss_val:
+                        sss_score = self.physics_fetcher.calculate_sss_score(sss_val)
+
+                    sla_val = self.physics_fetcher.get_sla_for_location(target_date_str, ref_lat, ref_lon)
+                    if sla_val:
+                        sla_score = self.physics_fetcher.calculate_sla_score(sla_val)
+                except Exception:
+                    pass
+
+            # Calculate composite score
+            # Base score from current spots (averaged)
+            base_score = 35  # Default
+            if self.sampled_spots:
+                scores = [s.get('score', 35) for s in self.sampled_spots if 'score' in s]
+                if scores:
+                    base_score = sum(scores) / len(scores)
+
+            # Apply daily environmental bonuses
+            tide_bonus = (tide_score - 0.5) * 30  # ±15 points
+            sss_bonus = (sss_score - 0.5) * 20   # ±10 points
+            sla_bonus = (sla_score - 0.5) * 16   # ±8 points
+
+            daily_score = base_score + tide_bonus + sss_bonus + sla_bonus
+            daily_score = max(10, min(95, daily_score))  # Clamp to valid range
+
+            # Get top 5 spots for this day (recalculated with daily bonuses)
+            top_spots = []
+            for spot in self.sampled_spots[:5]:
+                spot_base = spot.get('score', 35)
+                spot_score = spot_base + tide_bonus + sss_bonus + sla_bonus
+                spot_score = max(10, min(95, spot_score))
+                top_spots.append({
+                    'lat': float(spot.get('lat', 0)),
+                    'lon': float(spot.get('lon', 0)),
+                    'score': float(round(spot_score, 1)),
+                    'species': spot.get('species', [])
+                })
+
+            # Translate tide phase to Spanish
+            tide_phase_es = {
+                'flooding': 'Marea entrante',
+                'ebbing': 'Marea saliente',
+                'slack_high': 'Pleamar',
+                'slack_low': 'Bajamar',
+                'unknown': 'Desconocido'
+            }.get(tide_phase, tide_phase)
+
+            predictions.append({
+                'date': target_date_str,
+                'day_name': day_name,
+                'day_offset': day_offset,
+                'avg_score': float(round(daily_score, 1)),
+                'tide_score': float(round(tide_score, 2)),
+                'tide_phase': tide_phase_es,
+                'sss_score': float(round(sss_score, 2)),
+                'sla_score': float(round(sla_score, 2)),
+                'top_spots': top_spots
+            })
+
+        return predictions
 
     # === Private helpers ===
 

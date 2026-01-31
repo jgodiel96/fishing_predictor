@@ -986,6 +986,225 @@ class MapView:
 
         return ' + '.join(reasons)
 
+    def add_multiday_panel(self, multiday_data: List[Dict]):
+        """
+        Add interactive multi-day prediction panel.
+
+        When user selects a different day, the panel updates automatically
+        without needing to reload the page.
+
+        Args:
+            multiday_data: List of daily prediction dicts with keys:
+                - date: str (YYYY-MM-DD)
+                - day_name: str (Lun, Mar, etc.)
+                - avg_score: float
+                - tide_phase: str
+                - top_spots: List[Dict]
+        """
+        if not self.map or not multiday_data:
+            return
+
+        # Build day selector buttons
+        day_buttons = []
+        for i, day in enumerate(multiday_data):
+            is_today = i == 0
+            btn_style = 'background:#0d47a1;color:white;' if is_today else 'background:#e3f2fd;color:#0d47a1;'
+            day_buttons.append(f'''
+                <button class="day-btn{'  active' if is_today else ''}"
+                    data-day="{i}"
+                    onclick="selectDay({i})"
+                    style="{btn_style}padding:8px 12px;border:none;border-radius:5px;cursor:pointer;font-weight:bold;margin:2px;">
+                    {day['day_name']}<br><small>{day['date'][5:]}</small>
+                </button>
+            ''')
+
+        multiday_html = f'''
+        <!-- Multi-day Prediction Panel -->
+        <div id="multiday-panel" style="
+            position: fixed;
+            top: 10px;
+            left: 60px;
+            width: 380px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            padding: 15px;
+            z-index: 1000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-height: 90vh;
+            overflow-y: auto;
+        ">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h3 style="margin:0;color:#0d47a1;">📅 Prediccion por Dia</h3>
+                <button onclick="toggleMultidayPanel()" style="border:none;background:none;cursor:pointer;font-size:18px;">_</button>
+            </div>
+
+            <!-- Day Selector -->
+            <div style="display:flex;flex-wrap:wrap;justify-content:center;margin-bottom:15px;gap:4px;">
+                {''.join(day_buttons)}
+            </div>
+
+            <!-- Selected Day Info -->
+            <div id="day-info" style="background:#f5f5f5;padding:12px;border-radius:8px;margin-bottom:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span id="day-date" style="font-size:16px;font-weight:bold;color:#333;">
+                        {multiday_data[0]['date']}
+                    </span>
+                    <span id="day-score" style="font-size:24px;font-weight:bold;color:#4caf50;">
+                        {multiday_data[0]['avg_score']:.0f}/100
+                    </span>
+                </div>
+                <div style="margin-top:8px;display:flex;gap:15px;font-size:13px;">
+                    <span>🌊 <span id="day-tide">{multiday_data[0]['tide_phase']}</span></span>
+                    <span>💧 SSS: <span id="day-sss">{multiday_data[0]['sss_score']:.0f}</span></span>
+                    <span>📊 SLA: <span id="day-sla">{multiday_data[0]['sla_score']:.0f}</span></span>
+                </div>
+            </div>
+
+            <!-- Top Spots for Selected Day -->
+            <div style="margin-bottom:10px;">
+                <b style="color:#333;">Top 5 Spots del Dia:</b>
+            </div>
+            <table id="day-spots" style="width:100%;font-size:12px;border-collapse:collapse;">
+                <tr style="background:#e3f2fd;">
+                    <th style="padding:8px;text-align:left;">#</th>
+                    <th style="padding:8px;text-align:left;">Coordenadas</th>
+                    <th style="padding:8px;text-align:center;">Score</th>
+                </tr>
+                {self._build_spots_rows(multiday_data[0]['top_spots'])}
+            </table>
+
+            <!-- Score Legend -->
+            <div style="margin-top:12px;padding:10px;background:#fff3e0;border-radius:5px;font-size:11px;">
+                <b>Leyenda:</b>
+                <span style="color:#4caf50;">●</span> Excelente (70+)
+                <span style="color:#ff9800;">●</span> Bueno (50-69)
+                <span style="color:#f44336;">●</span> Regular (&lt;50)
+            </div>
+        </div>
+
+        <!-- Minimized Button -->
+        <div id="multiday-btn" style="
+            display: none;
+            position: fixed;
+            top: 10px;
+            left: 60px;
+            background: #0d47a1;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            z-index: 1000;
+            font-weight: bold;
+        " onclick="toggleMultidayPanel()">
+            📅 Prediccion 7 Dias
+        </div>
+
+        <style>
+            .day-btn:hover {{
+                transform: scale(1.05);
+                transition: transform 0.2s;
+            }}
+            .day-btn.active {{
+                background: #0d47a1 !important;
+                color: white !important;
+            }}
+            #multiday-panel::-webkit-scrollbar {{
+                width: 6px;
+            }}
+            #multiday-panel::-webkit-scrollbar-thumb {{
+                background: #ccc;
+                border-radius: 3px;
+            }}
+        </style>
+
+        <script>
+            // Multi-day prediction data
+            const multidayData = {json.dumps(multiday_data)};
+
+            function selectDay(dayIndex) {{
+                const day = multidayData[dayIndex];
+                if (!day) return;
+
+                // Update button styles
+                document.querySelectorAll('.day-btn').forEach((btn, i) => {{
+                    if (i === dayIndex) {{
+                        btn.classList.add('active');
+                        btn.style.background = '#0d47a1';
+                        btn.style.color = 'white';
+                    }} else {{
+                        btn.classList.remove('active');
+                        btn.style.background = '#e3f2fd';
+                        btn.style.color = '#0d47a1';
+                    }}
+                }});
+
+                // Update day info
+                document.getElementById('day-date').textContent = day.date;
+
+                const scoreEl = document.getElementById('day-score');
+                scoreEl.textContent = day.avg_score.toFixed(0) + '/100';
+                if (day.avg_score >= 70) scoreEl.style.color = '#4caf50';
+                else if (day.avg_score >= 50) scoreEl.style.color = '#ff9800';
+                else scoreEl.style.color = '#f44336';
+
+                document.getElementById('day-tide').textContent = day.tide_phase;
+                document.getElementById('day-sss').textContent = (day.sss_score * 100).toFixed(0);
+                document.getElementById('day-sla').textContent = (day.sla_score * 100).toFixed(0);
+
+                // Update spots table
+                const spotsTable = document.getElementById('day-spots');
+                const headerRow = spotsTable.querySelector('tr');
+                spotsTable.innerHTML = '';
+                spotsTable.appendChild(headerRow);
+
+                day.top_spots.forEach((spot, i) => {{
+                    const medal = ['🥇', '🥈', '🥉', '4.', '5.'][i];
+                    const scoreColor = spot.score >= 70 ? '#4caf50' : spot.score >= 50 ? '#ff9800' : '#f44336';
+                    const row = document.createElement('tr');
+                    row.style.borderBottom = '1px solid #eee';
+                    row.innerHTML = `
+                        <td style="padding:8px;">${{medal}}</td>
+                        <td style="padding:8px;font-size:11px;">${{spot.lat.toFixed(4)}}, ${{spot.lon.toFixed(4)}}</td>
+                        <td style="padding:8px;text-align:center;color:${{scoreColor}};font-weight:bold;">${{spot.score.toFixed(0)}}</td>
+                    `;
+                    spotsTable.appendChild(row);
+                }});
+            }}
+
+            function toggleMultidayPanel() {{
+                const panel = document.getElementById('multiday-panel');
+                const btn = document.getElementById('multiday-btn');
+                if (panel.style.display === 'none') {{
+                    panel.style.display = 'block';
+                    btn.style.display = 'none';
+                }} else {{
+                    panel.style.display = 'none';
+                    btn.style.display = 'block';
+                }}
+            }}
+        </script>
+        '''
+
+        self.map.get_root().html.add_child(folium.Element(multiday_html))
+
+    def _build_spots_rows(self, spots: List[Dict]) -> str:
+        """Build HTML rows for top spots table."""
+        rows = []
+        for i, spot in enumerate(spots[:5]):
+            medal = ['🥇', '🥈', '🥉', '4.', '5.'][i]
+            score = spot.get('score', 0)
+            color = '#4caf50' if score >= 70 else '#ff9800' if score >= 50 else '#f44336'
+
+            rows.append(f'''
+                <tr style="border-bottom:1px solid #eee;">
+                    <td style="padding:8px;">{medal}</td>
+                    <td style="padding:8px;font-size:11px;">{spot.get('lat', 0):.4f}, {spot.get('lon', 0):.4f}</td>
+                    <td style="padding:8px;text-align:center;color:{color};font-weight:bold;">{score:.0f}</td>
+                </tr>
+            ''')
+        return ''.join(rows)
+
     def finalize(self) -> folium.Map:
         """Add layer control and return map."""
         if self.map:

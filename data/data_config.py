@@ -300,6 +300,8 @@ class DataConfig:
             'noaa_sst': cls.RAW_SST_NOAA,
             'earthdata_sst': cls.RAW_SST_EARTHDATA,
             'copernicus_sst': cls.RAW_SST_COPERNICUS,
+            'copernicus_sss': cls.RAW_SSS_COPERNICUS,
+            'copernicus_sla': cls.RAW_SLA_COPERNICUS,
         }
         base_dir = source_dirs.get(source)
         if not base_dir:
@@ -315,6 +317,8 @@ class DataConfig:
             'noaa_sst': cls.RAW_SST_NOAA,
             'earthdata_sst': cls.RAW_SST_EARTHDATA,
             'copernicus_sst': cls.RAW_SST_COPERNICUS,
+            'copernicus_sss': cls.RAW_SSS_COPERNICUS,
+            'copernicus_sla': cls.RAW_SLA_COPERNICUS,
         }
         base_dir = source_dirs.get(source)
         if not base_dir:
@@ -349,6 +353,8 @@ class DataConfig:
             'noaa_sst': cls.RAW_SST_NOAA,
             'earthdata_sst': cls.RAW_SST_EARTHDATA,
             'copernicus_sst': cls.RAW_SST_COPERNICUS,
+            'copernicus_sss': cls.RAW_SSS_COPERNICUS,
+            'copernicus_sla': cls.RAW_SLA_COPERNICUS,
         }
         base_dir = source_dirs.get(source)
         if not base_dir or not base_dir.exists():

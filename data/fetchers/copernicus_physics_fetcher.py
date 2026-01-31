@@ -170,7 +170,8 @@ class CopernicusPhysicsFetcher:
             if manager:
                 manager.add_download(
                     filename=filename,
-                    period={'start': start_date, 'end': end_date},
+                    period_start=start_date,
+                    period_end=end_date,
                     records=len(df)
                 )
 
@@ -264,7 +265,8 @@ class CopernicusPhysicsFetcher:
             if manager:
                 manager.add_download(
                     filename=filename,
-                    period={'start': start_date, 'end': end_date},
+                    period_start=start_date,
+                    period_end=end_date,
                     records=len(df)
                 )
 
@@ -455,9 +457,9 @@ def download_all_physics(
         print("ERROR: Configure COPERNICUS_USER y COPERNICUS_PASS en .env")
         return
 
-    # Crear managers
-    sss_manager = ManifestManager(fetcher.sss_dir)
-    sla_manager = ManifestManager(fetcher.sla_dir)
+    # Crear managers con nombres de fuente correctos
+    sss_manager = ManifestManager('copernicus_sss')
+    sla_manager = ManifestManager('copernicus_sla')
 
     # Generar lista de meses
     months = []

@@ -16,6 +16,9 @@
 | **V1** | Arquitectura Bronze/Silver/Gold, datos reales 2020-2026 | ✅ Completado |
 | **V2** | Estado del Arte, validacion cientifica | ✅ Completado |
 | **V3** | Implementacion de mejoras tecnicas | ✅ Completado |
+| **V4** | Integración completa de datos al análisis principal | ✅ Completado |
+
+**Siguiente Plan:** [Plan V4 - Integración de Datos](PLAN_V4_INTEGRACION_DATOS.md)
 
 ---
 
@@ -222,7 +225,16 @@ Las mejoras implementadas estan basadas en literatura revisada en V2:
 
 ---
 
-## 6. Mejoras Futuras (V4)
+## 6. Siguiente Plan: V4 (COMPLETADO)
+
+**Ver:** [PLAN_V4_INTEGRACION_DATOS.md](PLAN_V4_INTEGRACION_DATOS.md)
+
+V4 integró todos los datos disponibles (mareas, SSS, SLA) al análisis principal:
+- Score promedio mejoró de ~25 a ~48 (+92%)
+- 6 fuentes de datos ahora integradas
+- 3 nuevas variables ambientales con bonuses
+
+### Mejoras Futuras (V5+)
 
 | Prioridad | Mejora | Descripcion |
 |-----------|--------|-------------|
@@ -248,4 +260,5 @@ Las mejoras implementadas estan basadas en literatura revisada en V2:
 ---
 
 *Plan V3 completado: 2026-01-30*
+*Actualizado: 2026-01-31 (referencia a V4)*
 *Proyecto: Fishing Predictor - Tacna/Ilo, Peru*

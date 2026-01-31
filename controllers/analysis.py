@@ -31,6 +31,13 @@ try:
 except ImportError:
     TIDES_AVAILABLE = False
 
+# SSS and SLA from Copernicus (V4)
+try:
+    from data.fetchers.copernicus_physics_fetcher import CopernicusPhysicsFetcher
+    PHYSICS_AVAILABLE = True
+except ImportError:
+    PHYSICS_AVAILABLE = False
+
 # Optional: Historical data for supervised learning
 try:
     from data.fetchers.historical_fetcher import HistoricalDataFetcher, FishMovementPredictor
@@ -98,6 +105,11 @@ class AnalysisController:
         # Tide data (V4)
         self.tide_fetcher: Optional['TideFetcher'] = None
         self.tide_data: Dict = {}
+
+        # SSS and SLA data (V4)
+        self.physics_fetcher: Optional['CopernicusPhysicsFetcher'] = None
+        self.sss_score: float = 0.5  # Neutral fallback
+        self.sla_score: float = 0.5  # Neutral fallback
 
         # Historical data for supervised learning
         self.historical_fetcher: Optional['HistoricalDataFetcher'] = None
@@ -286,13 +298,17 @@ class AnalysisController:
         return self.pca_analysis
 
     def analyze_spots(self) -> List[Dict]:
-        """Analyze and score fishing spots with tide integration (V4)."""
+        """Analyze and score fishing spots with tide, SSS, SLA integration (V4)."""
         if not self.fish_zones:
             self.generate_fish_zones()
 
-        # Get tide score (0-1) - fallback to 0.5 if not available
+        # Get environmental scores (0-1) - fallback to 0.5 if not available
         tide_score = self.tide_data.get('tide_score', 0.5) if self.tide_data else 0.5
         tide_phase = self.tide_data.get('tide_phase', 'unknown') if self.tide_data else 'unknown'
+
+        # SSS and SLA scores (V4)
+        sss_score = self.sss_score  # Set by _fetch_physics_data
+        sla_score = self.sla_score  # Set by _fetch_physics_data
 
         for spot in self.sampled_spots:
             best_score, best_dist, best_dir = 0, float('inf'), 0
@@ -319,20 +335,29 @@ class AnalysisController:
             # Apply ML boost if available
             ml_boost = self._get_ml_boost(spot['lat'], spot['lon'])
 
-            # Apply tide bonus (V4): up to +15 points for excellent tide conditions
-            tide_bonus = (tide_score - 0.5) * 30  # Range: -15 to +15
+            # Environmental bonuses (V4):
+            # Tide: up to ±15 points
+            tide_bonus = (tide_score - 0.5) * 30
+            # SSS: up to ±10 points (salinity optimal range)
+            sss_bonus = (sss_score - 0.5) * 20
+            # SLA: up to ±8 points (negative SLA = upwelling = good)
+            sla_bonus = (sla_score - 0.5) * 16
 
-            spot['score'] = min(100, max(0, best_score + ml_boost + tide_bonus))
+            total_bonus = tide_bonus + sss_bonus + sla_bonus
+
+            spot['score'] = min(100, max(0, best_score + ml_boost + total_bonus))
             spot['distance_to_fish'] = best_dist
             spot['direction_to_fish'] = best_dir
             spot['tide_phase'] = tide_phase
             spot['tide_score'] = tide_score
+            spot['sss_score'] = sss_score
+            spot['sla_score'] = sla_score
 
         self.sampled_spots.sort(key=lambda s: s['score'], reverse=True)
         return self.sampled_spots
 
     def get_conditions(self) -> Dict:
-        """Get weather, solunar, and tide conditions."""
+        """Get weather, solunar, tide, SSS and SLA conditions (V4)."""
         if not self.coastline_points:
             return {}
 
@@ -345,6 +370,10 @@ class AnalysisController:
         self._fetch_tide_data(center_lat, center_lon)
         if self.tide_data:
             self.conditions['tide'] = self.tide_data
+
+        # Add SSS and SLA data (V4)
+        physics_data = self._fetch_physics_data(center_lat, center_lon)
+        self.conditions['physics'] = physics_data
 
         return self.conditions
 
@@ -391,6 +420,44 @@ class AnalysisController:
             print(f"[WARN] Error obteniendo mareas: {e}")
             self.tide_data = {'tide_score': 0.5, 'tide_phase': 'unknown'}
             return self.tide_data
+
+    def _fetch_physics_data(self, lat: float, lon: float) -> Dict:
+        """Fetch SSS and SLA data for scoring (V4)."""
+        if not PHYSICS_AVAILABLE:
+            return {'sss_score': 0.5, 'sla_score': 0.5}
+
+        try:
+            if not self.physics_fetcher:
+                self.physics_fetcher = CopernicusPhysicsFetcher()
+
+            today = datetime.now().strftime('%Y-%m-%d')
+
+            # Get SSS (salinity)
+            sss_value = self.physics_fetcher.get_sss_for_location(today, lat, lon)
+            if sss_value is not None:
+                self.sss_score = self.physics_fetcher.calculate_sss_score(sss_value)
+            else:
+                self.sss_score = 0.5  # Neutral
+
+            # Get SLA (sea level anomaly)
+            sla_value = self.physics_fetcher.get_sla_for_location(today, lat, lon)
+            if sla_value is not None:
+                self.sla_score = self.physics_fetcher.calculate_sla_score(sla_value)
+            else:
+                self.sla_score = 0.5  # Neutral
+
+            return {
+                'sss_value': sss_value,
+                'sss_score': self.sss_score,
+                'sla_value': sla_value,
+                'sla_score': self.sla_score
+            }
+
+        except Exception as e:
+            print(f"[WARN] Error obteniendo SSS/SLA: {e}")
+            self.sss_score = 0.5
+            self.sla_score = 0.5
+            return {'sss_score': 0.5, 'sla_score': 0.5}
 
     def create_map(self, output_path: str = "output/analysis_map.html") -> str:
         """Create visualization map."""

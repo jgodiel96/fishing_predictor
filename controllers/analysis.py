@@ -24,6 +24,13 @@ from views.map_view import MapView, MapConfig
 from core.marine_data import MarineDataFetcher, FishZonePredictor
 from core.weather_solunar import get_fishing_conditions
 
+# Tide calculations (V3)
+try:
+    from data.fetchers.tide_fetcher import TideFetcher
+    TIDES_AVAILABLE = True
+except ImportError:
+    TIDES_AVAILABLE = False
+
 # Optional: Historical data for supervised learning
 try:
     from data.fetchers.historical_fetcher import HistoricalDataFetcher, FishMovementPredictor
@@ -87,6 +94,10 @@ class AnalysisController:
         # Anchovy migration model
         self.anchovy_model: Optional[AnchovyMigrationModel] = None
         self.anchovy_zones: List[Dict] = []
+
+        # Tide data (V4)
+        self.tide_fetcher: Optional['TideFetcher'] = None
+        self.tide_data: Dict = {}
 
         # Historical data for supervised learning
         self.historical_fetcher: Optional['HistoricalDataFetcher'] = None
@@ -275,9 +286,13 @@ class AnalysisController:
         return self.pca_analysis
 
     def analyze_spots(self) -> List[Dict]:
-        """Analyze and score fishing spots."""
+        """Analyze and score fishing spots with tide integration (V4)."""
         if not self.fish_zones:
             self.generate_fish_zones()
+
+        # Get tide score (0-1) - fallback to 0.5 if not available
+        tide_score = self.tide_data.get('tide_score', 0.5) if self.tide_data else 0.5
+        tide_phase = self.tide_data.get('tide_phase', 'unknown') if self.tide_data else 'unknown'
 
         for spot in self.sampled_spots:
             best_score, best_dist, best_dir = 0, float('inf'), 0
@@ -303,15 +318,21 @@ class AnalysisController:
 
             # Apply ML boost if available
             ml_boost = self._get_ml_boost(spot['lat'], spot['lon'])
-            spot['score'] = min(100, best_score + ml_boost)
+
+            # Apply tide bonus (V4): up to +15 points for excellent tide conditions
+            tide_bonus = (tide_score - 0.5) * 30  # Range: -15 to +15
+
+            spot['score'] = min(100, max(0, best_score + ml_boost + tide_bonus))
             spot['distance_to_fish'] = best_dist
             spot['direction_to_fish'] = best_dir
+            spot['tide_phase'] = tide_phase
+            spot['tide_score'] = tide_score
 
         self.sampled_spots.sort(key=lambda s: s['score'], reverse=True)
         return self.sampled_spots
 
     def get_conditions(self) -> Dict:
-        """Get weather and solunar conditions."""
+        """Get weather, solunar, and tide conditions."""
         if not self.coastline_points:
             return {}
 
@@ -319,7 +340,57 @@ class AnalysisController:
         center_lon = np.mean([p[1] for p in self.coastline_points])
 
         self.conditions = get_fishing_conditions(center_lat, center_lon)
+
+        # Add tide data (V4)
+        self._fetch_tide_data(center_lat, center_lon)
+        if self.tide_data:
+            self.conditions['tide'] = self.tide_data
+
         return self.conditions
+
+    def _fetch_tide_data(self, lat: float, lon: float) -> Dict:
+        """Fetch tide data for current time and location."""
+        if not TIDES_AVAILABLE:
+            self.tide_data = {}
+            return {}
+
+        try:
+            if not self.tide_fetcher:
+                self.tide_fetcher = TideFetcher()
+
+            now = datetime.now()
+            today = now.strftime('%Y-%m-%d')
+
+            # Get tide state for current time
+            tide_state = self.tide_fetcher.get_tidal_state(now, lat, lon)
+
+            # Get today's extremes
+            extremes = self.tide_fetcher.get_tide_extremes_for_date(today, lat, lon)
+
+            # Get best fishing hours
+            best_hours = self.tide_fetcher.get_best_fishing_hours(today, lat, lon, top_n=5)
+
+            # Convert TidalState namedtuple to dict if needed
+            if hasattr(tide_state, '_asdict'):
+                tide_dict = tide_state._asdict()
+            else:
+                tide_dict = tide_state if isinstance(tide_state, dict) else {}
+
+            self.tide_data = {
+                'current': tide_dict,
+                'extremes': extremes,
+                'best_hours': best_hours,
+                'tide_score': tide_dict.get('fishing_score', 0.5),
+                'tide_phase': tide_dict.get('phase', 'unknown'),
+                'tide_height': tide_dict.get('height', 0)
+            }
+
+            return self.tide_data
+
+        except Exception as e:
+            print(f"[WARN] Error obteniendo mareas: {e}")
+            self.tide_data = {'tide_score': 0.5, 'tide_phase': 'unknown'}
+            return self.tide_data
 
     def create_map(self, output_path: str = "output/analysis_map.html") -> str:
         """Create visualization map."""
@@ -364,34 +435,42 @@ class AnalysisController:
         print(f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n")
 
         # 1. Load coastline
-        print("[1/7] Cargando linea costera...")
+        print("[1/8] Cargando linea costera...")
         n_points = self.load_coastline(coastline_path)
         print(f"      {n_points} puntos cargados")
 
         # 2. Sample spots
-        print("\n[2/7] Muestreando puntos de pesca...")
+        print("\n[2/8] Muestreando puntos de pesca...")
         spots = self.sample_fishing_spots()
         print(f"      {len(spots)} spots muestreados")
 
         # 3. Generate fish zones
-        print("\n[3/7] Generando zonas de peces...")
+        print("\n[3/8] Generando zonas de peces...")
         zones = self.generate_fish_zones()
         print(f"      {len(zones)} zonas generadas")
 
-        # 4. Fetch marine data
-        print("\n[4/7] Obteniendo datos marinos...")
+        # 4. Predict anchovy migration
+        print("\n[4/8] Prediciendo zonas de anchoveta...")
+        anchovy_zones = self.predict_anchovy_migration(
+            target_date=datetime.now().strftime('%Y-%m-%d'),
+            target_hour=17
+        )
+        print(f"      {len(anchovy_zones)} zonas de anchoveta")
+
+        # 5. Fetch marine data
+        print("\n[5/8] Obteniendo datos marinos...")
         n_vectors = self.fetch_marine_data()
 
-        # 5. Get conditions (before ML for temporal features)
-        print("\n[5/7] Obteniendo condiciones meteorologicas y solunares...")
+        # 6. Get conditions (before ML for temporal features)
+        print("\n[6/8] Obteniendo condiciones meteorologicas y solunares...")
         conditions = self.get_conditions()
 
-        # 6. ML prediction (uses 32 advanced features)
-        print("\n[6/7] Ejecutando prediccion ML con 32 features...")
+        # 7. ML prediction (uses 32 advanced features)
+        print("\n[7/8] Ejecutando prediccion ML con 32 features...")
         pca_results = self.run_ml_prediction()
 
-        # 7. Analyze spots
-        print("\n[7/7] Analizando spots...")
+        # 8. Analyze spots
+        print("\n[8/8] Analizando spots...")
         results = self.analyze_spots()
 
         weather = conditions.get('weather', {})

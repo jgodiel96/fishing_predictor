@@ -151,28 +151,29 @@ class FishingLocation(NamedTuple):
 
 
 # Historical hotspots - verified locations from IMARPE and local fishermen
+# Coordinates corrected to match OSM coastline (2026-01-30)
 HOTSPOTS: Tuple[FishingLocation, ...] = (
     # Moquegua - Ilo (north to south)
-    FishingLocation("Ilo Puerto", -17.632, -71.345, Substrate.MIXED, 1.1, "Muelle y rocas adyacentes"),
-    FishingLocation("Pozo Lizas", -17.642, -71.340, Substrate.ROCK, 1.2, "Pozas entre rocas, ideal spinning"),
-    FishingLocation("Pocoma", -17.682, -71.295, Substrate.ROCK, 1.15, "Acantilados rocosos"),
-    FishingLocation("Punta Coles", -17.702, -71.332, Substrate.ROCK, 1.35, "Reserva, rocas con mucha vida marina"),
-    FishingLocation("Playa Media Luna", -17.732, -71.222, Substrate.SAND, 1.1, "Bahia arenosa en forma de media luna"),
-    FishingLocation("Fundicion", -17.757, -71.172, Substrate.ROCK, 1.2, "Rocas grandes, estructura compleja"),
-    FishingLocation("Pozo Redondo", -17.782, -71.122, Substrate.MIXED, 1.25, "Pozas naturales entre rocas"),
-    FishingLocation("Punta Blanca", -17.812, -71.082, Substrate.ROCK, 1.3, "Punta rocosa, buena para robalo"),
-    FishingLocation("Gentillar", -17.842, -71.048, Substrate.ROCK, 1.15, "Costa rocosa escarpada"),
+    FishingLocation("Ilo Puerto", -17.632, -71.348, Substrate.MIXED, 1.1, "Muelle y rocas adyacentes"),
+    FishingLocation("Pozo Lizas", -17.642, -71.348, Substrate.ROCK, 1.2, "Pozas entre rocas, ideal spinning"),
+    FishingLocation("Pocoma", -17.682, -71.377, Substrate.ROCK, 1.15, "Acantilados rocosos"),
+    FishingLocation("Punta Coles", -17.702, -71.385, Substrate.ROCK, 1.35, "Reserva, rocas con mucha vida marina"),
+    FishingLocation("Playa Media Luna", -17.732, -71.280, Substrate.SAND, 1.1, "Bahia arenosa en forma de media luna"),
+    FishingLocation("Fundicion", -17.757, -71.233, Substrate.ROCK, 1.2, "Rocas grandes, estructura compleja"),
+    FishingLocation("Pozo Redondo", -17.782, -71.189, Substrate.MIXED, 1.25, "Pozas naturales entre rocas"),
+    FishingLocation("Punta Blanca", -17.812, -71.168, Substrate.ROCK, 1.3, "Punta rocosa, buena para robalo"),
+    FishingLocation("Gentillar", -17.842, -71.113, Substrate.ROCK, 1.15, "Costa rocosa escarpada"),
     # Ite
-    FishingLocation("Ite Sur", -17.872, -71.018, Substrate.ROCK, 1.2, "Formaciones rocosas, cabrilla"),
-    FishingLocation("Ite Centro", -17.902, -70.992, Substrate.MIXED, 1.15, "Zona mixta productiva"),
-    FishingLocation("Ite Norte", -17.932, -70.968, Substrate.SAND, 1.2, "Playa amplia, surgencia activa"),
-    FishingLocation("Carlepe", -17.962, -70.948, Substrate.MIXED, 1.1, "Rocas y arena alternadas"),
-    FishingLocation("Punta Mesa", -17.988, -70.935, Substrate.ROCK, 1.15, "Punta rocosa con pozas"),
+    FishingLocation("Ite Sur", -17.872, -71.081, Substrate.ROCK, 1.2, "Formaciones rocosas, cabrilla"),
+    FishingLocation("Ite Centro", -17.902, -70.998, Substrate.MIXED, 1.15, "Zona mixta productiva"),
+    FishingLocation("Ite Norte", -17.932, -70.938, Substrate.SAND, 1.2, "Playa amplia, surgencia activa"),
+    FishingLocation("Carlepe", -17.962, -70.905, Substrate.MIXED, 1.1, "Rocas y arena alternadas"),
+    FishingLocation("Punta Mesa", -17.988, -70.889, Substrate.ROCK, 1.15, "Punta rocosa con pozas"),
     # Tacna
-    FishingLocation("Vila Vila", -18.018, -70.912, Substrate.ROCK, 1.25, "Zona rocosa, buena estructura"),
-    FishingLocation("Los Palos", -18.052, -70.883, Substrate.MIXED, 1.1, "Arena con rocas dispersas"),
-    FishingLocation("Santa Rosa", -18.087, -70.868, Substrate.SAND, 1.15, "Playa extensa, buena para corvina"),
-    FishingLocation("Boca del Rio", -18.1205, -70.843, Substrate.SAND, 1.2, "Desembocadura, playa arenosa"),
+    FishingLocation("Vila Vila", -18.018, -70.876, Substrate.ROCK, 1.25, "Zona rocosa, buena estructura"),
+    FishingLocation("Los Palos", -18.052, -70.807, Substrate.MIXED, 1.1, "Arena con rocas dispersas"),
+    FishingLocation("Santa Rosa", -18.087, -70.759, Substrate.SAND, 1.15, "Playa extensa, buena para corvina"),
+    FishingLocation("Boca del Rio", -18.1205, -70.728, Substrate.SAND, 1.2, "Desembocadura, playa arenosa"),
 )
 
 

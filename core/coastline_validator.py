@@ -343,6 +343,19 @@ class CoastlineValidator:
         """Compute SHA256 checksum of data."""
         return hashlib.sha256(data.encode()).hexdigest()
 
+    def _json_serializer(self, obj):
+        """Custom JSON serializer for numpy types."""
+        import numpy as np
+        if isinstance(obj, (np.bool_, bool)):
+            return bool(obj)
+        if isinstance(obj, (np.integer, int)):
+            return int(obj)
+        if isinstance(obj, (np.floating, float)):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
     def save_to_gold(
         self,
         points: List[Tuple[float, float]],
@@ -425,7 +438,7 @@ class CoastlineValidator:
 
         report_path = output_dir / f"coastline_{version}_report.json"
         with open(report_path, 'w') as f:
-            json.dump(report, f, indent=2)
+            json.dump(report, f, indent=2, default=self._json_serializer)
 
         print(f"[OK] Guardado en Gold layer:")
         print(f"     {geojson_path}")

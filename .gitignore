@@ -49,3 +49,5 @@ credentials.json
 data/raw/
 data/processed/
 data/analytics/
+# SAM model checkpoint (too large for git)
+models/sam/*.pth

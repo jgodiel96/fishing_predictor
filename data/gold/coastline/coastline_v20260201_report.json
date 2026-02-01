@@ -1,0 +1,10 @@
+{
+  "version": "v20260201",
+  "created_at": "2026-02-01T20:19:08.064599Z",
+  "checksum": "sha256:b857086b45671f26681355cf66f94fe1de7320b955a373ecdb9d58e08d566fb7",
+  "validation": {
+    "is_valid": false,
+    "checks": {
+      "spacing": false,
+      "confidence": true,
+      "coverage": 

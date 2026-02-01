@@ -151,9 +151,9 @@ class DataConfig:
         'lat_min': -18.3,
         'lat_max': -17.3,
         'lon_min': -71.5,
-        'lon_max': -70.8,
-        'name': 'Tacna-Ilo, Peru',
-        'description': 'Coastal fishing zone from Tacna to Ilo'
+        'lon_max': -70.2,  # Expanded to include Playa Canepa
+        'name': 'Tacna-Ilo-Sama, Peru',
+        'description': 'Coastal fishing zone from Ilo to Sama (includes Playa Canepa)'
     }
 
     # Grid resolution for spatial analysis

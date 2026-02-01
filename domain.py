@@ -174,6 +174,11 @@ HOTSPOTS: Tuple[FishingLocation, ...] = (
     FishingLocation("Los Palos", -18.052, -70.807, Substrate.MIXED, 1.1, "Arena con rocas dispersas"),
     FishingLocation("Santa Rosa", -18.087, -70.759, Substrate.SAND, 1.15, "Playa extensa, buena para corvina"),
     FishingLocation("Boca del Rio", -18.1205, -70.728, Substrate.SAND, 1.2, "Desembocadura, playa arenosa"),
+    # Sama - Playa Canepa area (2km radius fishing zones)
+    FishingLocation("Playa Canepa Norte", -18.010, -70.260, Substrate.ROCK, 1.3, "Rocas al norte de Canepa, buena estructura"),
+    FishingLocation("Playa Canepa", -18.018, -70.251, Substrate.MIXED, 1.35, "Playa principal, oleaje intermedio"),
+    FishingLocation("Playa Canepa Sur", -18.025, -70.245, Substrate.ROCK, 1.25, "Rocas al sur, pozas naturales"),
+    FishingLocation("Morro Sama", -18.035, -70.235, Substrate.ROCK, 1.3, "Formaciones rocosas del Morro"),
 )
 
 

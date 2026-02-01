@@ -27,10 +27,11 @@ def run_analysis(target_date: str = None):
     """
     from controllers.analysis import AnalysisController
     from datetime import datetime
+    from config import COASTLINE_FILE
 
     controller = AnalysisController()
 
-    coastline_path = "data/cache/coastline_real_osm.geojson"
+    coastline_path = str(COASTLINE_FILE)
     output_path = "output/fishing_analysis_ml.html"
 
     if not os.path.exists(coastline_path):
@@ -70,10 +71,11 @@ def run_tests():
 def run_supervised_analysis():
     """Run analysis with supervised ML (trained on historical data)."""
     from controllers.analysis import AnalysisController
+    from config import COASTLINE_FILE
 
     controller = AnalysisController()
 
-    coastline_path = "data/cache/coastline_real_osm.geojson"
+    coastline_path = str(COASTLINE_FILE)
     output_path = "output/fishing_analysis_supervised.html"
 
     if not os.path.exists(coastline_path):

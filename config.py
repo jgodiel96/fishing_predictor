@@ -93,13 +93,16 @@ PROJECT_ROOT = Path(__file__).parent
 CACHE_DIR = PROJECT_ROOT / "data" / "cache"
 OUTPUT_DIR = PROJECT_ROOT / "output"
 HISTORICAL_DIR = PROJECT_ROOT / "data" / "historical"
+GOLD_DIR = PROJECT_ROOT / "data" / "gold"
 
 # Ensure directories exist
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+GOLD_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_OUTPUT_FILE = "fishing_map.html"
-COASTLINE_FILE = CACHE_DIR / "coastline_real_osm.geojson"
+# V5: Use refined coastline from Gold layer (6,732 points, 50m max spacing)
+COASTLINE_FILE = GOLD_DIR / "coastline" / "coastline_v1.geojson"
 
 
 # =============================================================================

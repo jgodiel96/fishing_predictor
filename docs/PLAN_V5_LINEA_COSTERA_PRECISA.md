@@ -44,65 +44,141 @@ Crear una **línea costera definitiva y permanente** que:
 
 ---
 
-## Arquitectura de la Solución
+## Arquitectura de la Solución (SAM - Segment Anything Model)
+
+### Hardware Disponible
+- **MacBook Pro M3 Pro**
+- **18GB RAM**
+- **Metal Performance Shaders (MPS)** para aceleración GPU
+
+### Modelo Principal: SAM (Segment Anything Model)
+- **Desarrollado por:** Meta AI Research
+- **Precisión:** Estado del arte en segmentación
+- **Ventaja:** Zero-shot, no requiere entrenamiento
+- **RAM requerida:** ~10GB (cabe en 18GB)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    FASE 1: DETECCIÓN                        │
+│                    FASE 1: SEGMENTACIÓN SAM                 │
 ├─────────────────────────────────────────────────────────────┤
-│  Imagen Satelital (ESRI)  ──►  Detección de Agua (HSV)     │
-│                                      │                      │
-│                                      ▼                      │
-│                              Contornos OpenCV               │
-│                                      │                      │
-│                                      ▼                      │
-│                         Puntos Candidatos (~5000)           │
-└─────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    FASE 2: VERIFICACIÓN                     │
-├─────────────────────────────────────────────────────────────┤
-│  Para cada punto candidato:                                 │
 │                                                             │
-│  ┌──────────────┐      ┌──────────────┐                    │
-│  │   Satelital  │      │  Mapa Calle  │                    │
-│  │   (pixel)    │      │   (pixel)    │                    │
-│  └──────┬───────┘      └──────┬───────┘                    │
-│         │                     │                             │
-│         ▼                     ▼                             │
-│  ┌──────────────┐      ┌──────────────┐                    │
-│  │ ¿Es agua a   │      │ ¿Es agua a   │                    │
-│  │ la izquierda?│      │ la izquierda?│                    │
-│  └──────┬───────┘      └──────┬───────┘                    │
-│         │                     │                             │
-│         └─────────┬───────────┘                             │
-│                   ▼                                         │
-│         ┌─────────────────┐                                 │
-│         │ Ambos coinciden │──► PUNTO VÁLIDO                │
-│         │ (agua oeste,    │                                 │
-│         │  tierra este)   │                                 │
-│         └─────────────────┘                                 │
+│  ┌─────────────────┐                                        │
+│  │ Imagen Satelital│                                        │
+│  │    (ESRI)       │                                        │
+│  └────────┬────────┘                                        │
+│           │                                                 │
+│           ▼                                                 │
+│  ┌─────────────────────────────────────────┐               │
+│  │         SAM (Segment Anything)          │               │
+│  │  ┌─────────────────────────────────┐    │               │
+│  │  │   Image Encoder (ViT-H/16)      │    │               │
+│  │  │   - 632M parámetros             │    │               │
+│  │  │   - Procesa imagen completa     │    │               │
+│  │  └─────────────┬───────────────────┘    │               │
+│  │                │                        │               │
+│  │                ▼                        │               │
+│  │  ┌─────────────────────────────────┐    │               │
+│  │  │   Prompt: "water body edge"     │    │               │
+│  │  │   + puntos semilla en el mar    │    │               │
+│  │  └─────────────┬───────────────────┘    │               │
+│  │                │                        │               │
+│  │                ▼                        │               │
+│  │  ┌─────────────────────────────────┐    │               │
+│  │  │   Mask Decoder                  │    │               │
+│  │  │   - Genera máscara agua/tierra  │    │               │
+│  │  └─────────────────────────────────┘    │               │
+│  └─────────────────────────────────────────┘               │
+│           │                                                 │
+│           ▼                                                 │
+│  ┌─────────────────┐                                        │
+│  │  Máscara Binaria│  (agua=1, tierra=0)                   │
+│  │  Alta Precisión │                                        │
+│  └────────┬────────┘                                        │
+│           │                                                 │
+│           ▼                                                 │
+│  ┌─────────────────┐                                        │
+│  │ Extracción de   │                                        │
+│  │ Contorno (borde)│  → Puntos candidatos (~10,000)        │
+│  └─────────────────┘                                        │
+│                                                             │
 └─────────────────────────────────────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    FASE 3: REFINAMIENTO                     │
+│              FASE 2: VERIFICACIÓN DUAL SAM                  │
 ├─────────────────────────────────────────────────────────────┤
-│  1. Filtrar puntos que no pasaron verificación              │
-│  2. Interpolar para garantizar espaciado ≤ 200m            │
-│  3. Suavizar curva (Savitzky-Golay o spline)               │
-│  4. Ordenar de sur a norte                                  │
+│                                                             │
+│  ┌──────────────────┐      ┌──────────────────┐            │
+│  │ SAM + Satelital  │      │  SAM + Mapa OSM  │            │
+│  │                  │      │                  │            │
+│  │  Máscara agua A  │      │  Máscara agua B  │            │
+│  └────────┬─────────┘      └────────┬─────────┘            │
+│           │                         │                       │
+│           └────────────┬────────────┘                       │
+│                        ▼                                    │
+│           ┌────────────────────────┐                        │
+│           │   IoU (Intersection    │                        │
+│           │   over Union)          │                        │
+│           │                        │                        │
+│           │   IoU > 0.85 = VÁLIDO  │                        │
+│           └────────────────────────┘                        │
+│                        │                                    │
+│                        ▼                                    │
+│           ┌────────────────────────┐                        │
+│           │  Contorno Consensuado  │                        │
+│           │  (donde ambos coinciden)│                       │
+│           └────────────────────────┘                        │
+│                                                             │
 └─────────────────────────────────────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    FASE 4: VALIDACIÓN FINAL                 │
+│                FASE 3: REFINAMIENTO GEOMÉTRICO              │
 ├─────────────────────────────────────────────────────────────┤
-│  1. Verificar espaciado máximo 200m ✓                       │
-│  2. Verificar que todos los puntos están en la costa ✓      │
-│  3. Generar reporte de calidad                              │
-│  4. Guardar como INMUTABLE en data/gold/                    │
+│                                                             │
+│  1. Douglas-Peucker simplificación (preservar forma)        │
+│                                                             │
+│  2. Garantizar espaciado ≤ 200m:                           │
+│     ┌─────────────────────────────────────────┐            │
+│     │ Para cada par de puntos consecutivos:   │            │
+│     │   Si distancia > 200m:                  │            │
+│     │     Insertar puntos intermedios         │            │
+│     │     usando interpolación cúbica         │            │
+│     └─────────────────────────────────────────┘            │
+│                                                             │
+│  3. Suavizado con Savitzky-Golay filter                    │
+│     (elimina ruido, preserva bordes)                       │
+│                                                             │
+│  4. Ordenar geográficamente (sur → norte)                  │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                FASE 4: VALIDACIÓN Y GUARDADO                │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────────────────────────────────────┐               │
+│  │ VALIDACIONES AUTOMÁTICAS:               │               │
+│  │                                         │               │
+│  │ ✓ Espaciado máximo ≤ 200m              │               │
+│  │ ✓ Espaciado mínimo ≥ 50m               │               │
+│  │ ✓ IoU promedio ≥ 85%                   │               │
+│  │ ✓ Sin puntos aislados                  │               │
+│  │ ✓ Continuidad de la línea              │               │
+│  │ ✓ Todos los puntos en zona costera     │               │
+│  └─────────────────────────────────────────┘               │
+│                        │                                    │
+│                        ▼                                    │
+│  ┌─────────────────────────────────────────┐               │
+│  │ GUARDADO INMUTABLE:                     │               │
+│  │                                         │               │
+│  │ data/gold/coastline/                    │               │
+│  │ ├── coastline_v1.geojson   (datos)     │               │
+│  │ ├── coastline_v1.sha256    (checksum)  │               │
+│  │ └── coastline_v1_report.json (métricas)│               │
+│  └─────────────────────────────────────────┘               │
+│                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -150,35 +226,79 @@ Crear una **línea costera definitiva y permanente** que:
 
 ## Especificaciones Técnicas
 
-### Parámetros de Detección
+### Requisitos de Hardware
+
+```yaml
+Hardware Mínimo:
+  RAM: 16GB
+  GPU: Metal compatible (M1/M2/M3)
+  Almacenamiento: 5GB libres
+
+Hardware Usado:
+  Modelo: MacBook Pro M3 Pro
+  RAM: 18GB
+  GPU: Metal Performance Shaders (MPS)
+  Aceleración: PyTorch MPS backend
+```
+
+### Configuración SAM
 
 ```python
-DETECTION_CONFIG = {
-    'zoom_level': 16,           # Alta resolución
-    'tile_size': 256,           # Pixeles por tile
-    'meters_per_pixel': 2.4,    # A zoom 16, ~2.4m/pixel
+SAM_CONFIG = {
+    # Modelo
+    'model_type': 'vit_h',           # ViT-Huge (mejor precisión)
+    'checkpoint': 'sam_vit_h_4b8939.pth',
+    'model_size_gb': 2.4,
 
-    # HSV ranges para agua
-    'water_hsv_low': [90, 30, 30],
-    'water_hsv_high': [130, 255, 255],
+    # Dispositivo
+    'device': 'mps',                  # Metal Performance Shaders
+    'dtype': 'float32',               # Precisión completa
 
-    # Parámetros de contorno
-    'contour_method': cv2.CHAIN_APPROX_NONE,
-    'min_contour_area': 1000,   # Pixeles mínimos
+    # Imagen
+    'image_size': 1024,               # Resolución de entrada SAM
+    'tile_size': 512,                 # Tamaño de tile para procesar
+
+    # Prompts para segmentación
+    'prompt_points': [                # Puntos semilla en el mar
+        {'type': 'point', 'coords': 'auto_detect_water'},
+    ],
+    'multimask_output': False,        # Una máscara por imagen
 }
 ```
 
-### Parámetros de Verificación
+### Parámetros de Segmentación
+
+```python
+SEGMENTATION_CONFIG = {
+    # Tiles satelitales
+    'zoom_level': 16,                 # ~2.4m/pixel
+    'tile_source': 'esri_worldimagery',
+
+    # Post-procesamiento de máscara
+    'mask_threshold': 0.5,            # Umbral de confianza SAM
+    'min_area_pixels': 500,           # Área mínima para considerar
+    'morphology_kernel': 5,           # Kernel para limpieza
+
+    # Extracción de contorno
+    'contour_method': 'CHAIN_APPROX_NONE',  # Máxima precisión
+    'simplify_epsilon': 0.5,          # Douglas-Peucker epsilon
+}
+```
+
+### Parámetros de Verificación Dual
 
 ```python
 VERIFICATION_CONFIG = {
-    'check_radius_pixels': 10,   # Radio de verificación
-    'water_threshold': 0.6,      # 60% pixels deben ser agua
-    'confidence_threshold': 0.8, # 80% mínimo para aceptar
+    # Comparación de máscaras
+    'iou_threshold': 0.85,            # 85% IoU mínimo
+    'pixel_agreement_threshold': 0.90, # 90% acuerdo
 
-    # Dirección al mar (Perú costa oeste)
-    'sea_direction': 'west',     # El mar está al oeste
-    'direction_tolerance': 45,   # Grados de tolerancia
+    # Fuentes de verificación
+    'sources': ['esri_satellite', 'osm_standard'],
+
+    # Validación de dirección
+    'sea_direction': 'west',          # Océano al oeste
+    'direction_check_distance_m': 100, # Verificar 100m hacia el mar
 }
 ```
 
@@ -186,10 +306,41 @@ VERIFICATION_CONFIG = {
 
 ```python
 REFINEMENT_CONFIG = {
-    'max_spacing_m': 200,        # Espaciado máximo
-    'min_spacing_m': 50,         # Espaciado mínimo
-    'smoothing_window': 5,       # Ventana de suavizado
-    'interpolation_method': 'linear',
+    # Espaciado
+    'max_spacing_m': 200,             # MÁXIMO 200 metros
+    'min_spacing_m': 50,              # Mínimo 50 metros
+    'target_spacing_m': 150,          # Objetivo ideal
+
+    # Interpolación
+    'interpolation_method': 'cubic',  # Spline cúbico
+    'preserve_corners': True,         # Mantener esquinas naturales
+
+    # Suavizado
+    'smoothing_method': 'savgol',     # Savitzky-Golay
+    'smoothing_window': 7,            # Ventana de 7 puntos
+    'smoothing_order': 3,             # Orden polinomial
+}
+```
+
+### Dependencias Python
+
+```python
+DEPENDENCIES = {
+    # SAM
+    'segment-anything': '1.0',
+    'torch': '>=2.0',                 # Con soporte MPS
+
+    # Procesamiento de imágenes
+    'opencv-python': '>=4.8',
+    'pillow': '>=10.0',
+    'numpy': '>=1.24',
+
+    # Geoespacial
+    'shapely': '>=2.0',
+    'geojson': '>=3.0',
+
+    # Científico
+    'scipy': '>=1.11',                # Para Savitzky-Golay
 }
 ```
 
@@ -199,78 +350,229 @@ REFINEMENT_CONFIG = {
 
 ```
 core/
-├── coastline_detector.py      # Fase 1: Detección (existe)
-├── coastline_verifier.py      # Fase 2: Verificación CV (nuevo)
-├── coastline_refiner.py       # Fase 3: Refinamiento (nuevo)
+├── coastline_detector.py      # Fase 1: Detección HSV (existe)
+├── coastline_sam.py           # Fase 1: Detección SAM (nuevo)
+├── coastline_verifier.py      # Fase 2: Verificación dual (nuevo)
+├── coastline_refiner.py       # Fase 3: Refinamiento 200m (nuevo)
 ├── coastline_validator.py     # Fase 4: Validación (nuevo)
 └── coastline_pipeline.py      # Orquestador completo (nuevo)
+
+models/
+└── sam/
+    ├── sam_vit_h_4b8939.pth   # Checkpoint SAM ViT-H (~2.4GB)
+    └── README.md              # Instrucciones de descarga
 
 data/
 ├── cache/
 │   └── tiles/                 # Tiles descargados
-│       ├── satellite/
-│       └── street/
+│       ├── satellite/         # ESRI World Imagery
+│       └── street/            # OSM Standard
 └── gold/
     └── coastline/
         ├── coastline_v1.geojson      # Versión inmutable
-        ├── coastline_v1.checksum     # SHA256
-        └── coastline_v1_report.json  # Reporte de calidad
+        ├── coastline_v1.sha256       # Checksum
+        └── coastline_v1_report.json  # Métricas de calidad
 ```
 
 ---
 
-## Algoritmo de Verificación CV
+## Algoritmo Principal: SAM Segmentation
 
 ```python
-def verify_point(lat, lon, satellite_img, street_img):
+class SAMCoastlineDetector:
     """
-    Verifica si un punto está en la línea costera.
+    Detector de línea costera usando Segment Anything Model (SAM).
 
-    Criterio:
-    - A la izquierda (oeste) del punto debe haber AGUA
-    - A la derecha (este) del punto debe haber TIERRA
-    - Esto debe cumplirse en AMBAS imágenes
+    SAM es un modelo de segmentación zero-shot desarrollado por Meta AI
+    que puede segmentar cualquier objeto con alta precisión.
     """
 
-    # 1. Obtener pixel del punto en ambas imágenes
-    px_sat, py_sat = latlon_to_pixel(lat, lon, satellite_img)
-    px_str, py_str = latlon_to_pixel(lat, lon, street_img)
+    def __init__(self):
+        import torch
+        from segment_anything import sam_model_registry, SamPredictor
 
-    # 2. Analizar región oeste (hacia el mar)
-    west_region_sat = satellite_img[py_sat-5:py_sat+5, px_sat-20:px_sat]
-    west_region_str = street_img[py_str-5:py_str+5, px_str-20:px_str]
+        # Usar MPS (Metal) en Mac M3
+        self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
-    # 3. Analizar región este (hacia tierra)
-    east_region_sat = satellite_img[py_sat-5:py_sat+5, px_sat:px_sat+20]
-    east_region_str = street_img[py_str-5:py_str+5, px_str:px_str+20]
+        # Cargar modelo SAM ViT-H (el más preciso)
+        self.sam = sam_model_registry["vit_h"](checkpoint="sam_vit_h_4b8939.pth")
+        self.sam.to(self.device)
+        self.predictor = SamPredictor(self.sam)
 
-    # 4. Calcular porcentaje de agua en cada región
-    water_west_sat = calculate_water_percentage(west_region_sat)
-    water_west_str = calculate_water_percentage(west_region_str)
-    water_east_sat = calculate_water_percentage(east_region_sat)
-    water_east_str = calculate_water_percentage(east_region_str)
+    def segment_water(self, image: np.ndarray) -> np.ndarray:
+        """
+        Segmenta el agua en una imagen satelital.
 
-    # 5. Criterio de validación
-    # Oeste debe ser >60% agua, Este debe ser <40% agua
-    valid_sat = (water_west_sat > 0.6) and (water_east_sat < 0.4)
-    valid_str = (water_west_str > 0.6) and (water_east_str < 0.4)
+        Args:
+            image: Imagen RGB (H, W, 3)
 
-    # 6. Score de confianza
-    confidence = (
-        (water_west_sat + water_west_str) / 2 * 0.5 +
-        (1 - water_east_sat + 1 - water_east_str) / 2 * 0.5
-    )
+        Returns:
+            Máscara binaria (H, W) donde 1=agua, 0=tierra
+        """
+        # 1. Preparar imagen para SAM
+        self.predictor.set_image(image)
 
-    return {
-        'valid': valid_sat and valid_str,
-        'confidence': confidence,
-        'details': {
-            'water_west_satellite': water_west_sat,
-            'water_west_street': water_west_str,
-            'water_east_satellite': water_east_sat,
-            'water_east_street': water_east_str,
-        }
-    }
+        # 2. Detectar puntos semilla automáticamente
+        #    (buscar regiones azules para identificar el mar)
+        seed_points = self._detect_water_seeds(image)
+
+        # 3. Generar máscara usando SAM
+        masks, scores, _ = self.predictor.predict(
+            point_coords=seed_points,
+            point_labels=np.ones(len(seed_points)),  # Todos positivos (agua)
+            multimask_output=False
+        )
+
+        # 4. Post-procesar máscara
+        water_mask = masks[0].astype(np.uint8)
+        water_mask = self._clean_mask(water_mask)
+
+        return water_mask
+
+    def _detect_water_seeds(self, image: np.ndarray) -> np.ndarray:
+        """
+        Detecta puntos semilla en el agua usando análisis de color.
+        Estos puntos ayudan a SAM a entender qué segmentar.
+        """
+        # Convertir a HSV
+        hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+
+        # Detectar azul (agua)
+        water_mask = cv2.inRange(hsv, (90, 30, 30), (130, 255, 255))
+
+        # Encontrar centroide de la región de agua más grande
+        contours, _ = cv2.findContours(water_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if not contours:
+            # Fallback: usar esquina oeste (generalmente mar en Perú)
+            h, w = image.shape[:2]
+            return np.array([[w // 4, h // 2]])
+
+        # Usar centroide del contorno más grande
+        largest = max(contours, key=cv2.contourArea)
+        M = cv2.moments(largest)
+        if M["m00"] > 0:
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+            return np.array([[cx, cy]])
+
+        return np.array([[image.shape[1] // 4, image.shape[0] // 2]])
+
+    def _clean_mask(self, mask: np.ndarray) -> np.ndarray:
+        """Limpia la máscara con operaciones morfológicas."""
+        kernel = np.ones((5, 5), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        return mask
+
+    def extract_coastline(self, water_mask: np.ndarray) -> List[Tuple[int, int]]:
+        """
+        Extrae la línea costera como lista de puntos (x, y).
+
+        La línea costera es el borde entre agua (1) y tierra (0).
+        """
+        # Encontrar contornos
+        contours, _ = cv2.findContours(
+            water_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
+        )
+
+        if not contours:
+            return []
+
+        # Tomar el contorno más largo (la costa principal)
+        coastline_contour = max(contours, key=len)
+
+        # Convertir a lista de puntos
+        points = [(int(p[0][0]), int(p[0][1])) for p in coastline_contour]
+
+        return points
+
+
+def verify_coastline_dual_source(
+    coastline_points: List[Tuple[float, float]],
+    detector: SAMCoastlineDetector
+) -> List[Dict]:
+    """
+    Verifica cada punto de la línea costera usando dos fuentes:
+    1. Imagen satelital (ESRI)
+    2. Mapa de calles (OSM)
+
+    Calcula IoU (Intersection over Union) entre las dos máscaras.
+    """
+    verified_points = []
+
+    for lat, lon in coastline_points:
+        # Obtener tile satelital
+        sat_image = fetch_satellite_tile(lat, lon, zoom=16)
+        sat_mask = detector.segment_water(sat_image)
+
+        # Obtener tile mapa calle
+        street_image = fetch_street_tile(lat, lon, zoom=16)
+        street_mask = detector.segment_water(street_image)
+
+        # Calcular IoU
+        intersection = np.logical_and(sat_mask, street_mask).sum()
+        union = np.logical_or(sat_mask, street_mask).sum()
+        iou = intersection / union if union > 0 else 0
+
+        # Verificar que el punto está en el borde
+        pixel_x, pixel_y = latlon_to_pixel(lat, lon, tile_bounds)
+        is_on_edge = is_point_on_mask_edge(sat_mask, pixel_x, pixel_y, radius=5)
+
+        verified_points.append({
+            'lat': lat,
+            'lon': lon,
+            'iou': iou,
+            'is_valid': iou >= 0.85 and is_on_edge,
+            'confidence': iou * (0.9 if is_on_edge else 0.5)
+        })
+
+    return verified_points
+```
+
+### Algoritmo de Refinamiento con Espaciado ≤ 200m
+
+```python
+def ensure_max_spacing(
+    coastline: List[Tuple[float, float]],
+    max_spacing_m: float = 200
+) -> List[Tuple[float, float]]:
+    """
+    Garantiza que ningún par de puntos consecutivos tenga más de max_spacing_m.
+
+    Usa interpolación cúbica para insertar puntos intermedios naturales.
+    """
+    from scipy.interpolate import CubicSpline
+
+    refined = [coastline[0]]
+
+    for i in range(1, len(coastline)):
+        p1 = refined[-1]
+        p2 = coastline[i]
+
+        # Calcular distancia
+        dist = haversine_distance(p1[0], p1[1], p2[0], p2[1])
+
+        if dist <= max_spacing_m:
+            refined.append(p2)
+        else:
+            # Necesitamos interpolar
+            num_segments = int(np.ceil(dist / max_spacing_m))
+
+            # Crear spline entre los dos puntos
+            t = np.array([0, 1])
+            lats = np.array([p1[0], p2[0]])
+            lons = np.array([p1[1], p2[1]])
+
+            # Interpolar
+            t_new = np.linspace(0, 1, num_segments + 1)[1:]  # Excluir p1
+
+            for t_val in t_new:
+                new_lat = p1[0] + t_val * (p2[0] - p1[0])
+                new_lon = p1[1] + t_val * (p2[1] - p1[1])
+                refined.append((new_lat, new_lon))
+
+    return refined
 ```
 
 ---

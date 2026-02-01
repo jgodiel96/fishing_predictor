@@ -147,8 +147,38 @@ class AnalysisController:
 
         return len(self.coastline_points)
 
-    def sample_fishing_spots(self, num_spots: int = 35) -> List[Dict]:
-        """Sample spots along the coastline."""
+    def sample_fishing_spots(self, num_spots: int = None, spacing_m: int = 750, max_spots: int = 200) -> List[Dict]:
+        """
+        Sample spots along the coastline with specified spacing.
+
+        Args:
+            num_spots: Fixed number of spots (if provided, overrides spacing)
+            spacing_m: Target spacing between spots in meters (default: 750m)
+                      Use 500-1000m for high-resolution analysis
+            max_spots: Maximum number of spots to sample (default: 200)
+
+        Returns:
+            List of sampled fishing spots
+        """
+        if not self.coastline_points:
+            return []
+
+        # Calculate coastline length to determine number of spots
+        if num_spots is None:
+            total_length_m = 0
+            for i in range(1, len(self.coastline_points)):
+                p1 = self.coastline_points[i-1]
+                p2 = self.coastline_points[i]
+                dist = self._distance_m(p1[0], p1[1], p2[0], p2[1])
+                # Only count segments < 10km (ignore gaps)
+                if dist < 10000:
+                    total_length_m += dist
+
+            # Calculate number of spots based on spacing
+            num_spots = max(10, min(max_spots, int(total_length_m / spacing_m)))
+            actual_spacing = total_length_m / num_spots if num_spots > 0 else spacing_m
+            print(f"[INFO] Costa: {total_length_m/1000:.1f}km, espaciado efectivo: {actual_spacing:.0f}m, spots: {num_spots}")
+
         if len(self.coastline_points) <= num_spots:
             indices = range(len(self.coastline_points))
         else:
@@ -171,6 +201,75 @@ class AnalysisController:
             })
 
         return self.sampled_spots
+
+    def _add_focus_zone_spots(
+        self,
+        center_lat: float,
+        center_lon: float,
+        radius_km: float = 2.0,
+        spacing_m: int = 500,
+        zone_name: str = "Focus Zone"
+    ) -> List[Dict]:
+        """
+        Add dense sampling spots around a focus zone.
+
+        Args:
+            center_lat, center_lon: Center of focus zone
+            radius_km: Radius of focus zone in km
+            spacing_m: Spacing between spots in meters (500-1000m recommended)
+            zone_name: Name of the zone for labeling
+
+        Returns:
+            List of new spots added
+        """
+        # Find coastline points within the focus zone
+        zone_points = []
+        for i, (lat, lon) in enumerate(self.coastline_points):
+            dist = self._distance_m(lat, lon, center_lat, center_lon)
+            if dist <= radius_km * 1000:
+                zone_points.append((i, lat, lon))
+
+        if not zone_points:
+            print(f"[WARN] No hay puntos de costa en zona {zone_name}")
+            return []
+
+        # Calculate number of spots based on zone coastline length
+        zone_length_m = 0
+        for i in range(1, len(zone_points)):
+            p1 = zone_points[i-1]
+            p2 = zone_points[i]
+            zone_length_m += self._distance_m(p1[1], p1[2], p2[1], p2[2])
+
+        num_zone_spots = max(5, int(zone_length_m / spacing_m))
+
+        # Sample evenly within zone
+        if len(zone_points) <= num_zone_spots:
+            zone_indices = range(len(zone_points))
+        else:
+            zone_indices = np.linspace(0, len(zone_points) - 1, num_zone_spots, dtype=int)
+
+        new_spots = []
+        start_id = len(self.sampled_spots) + 1
+
+        for j, zi in enumerate(zone_indices):
+            orig_idx, lat, lon = zone_points[zi]
+            bearing = self._perpendicular_to_sea(orig_idx)
+
+            spot = {
+                'id': start_id + j,
+                'lat': lat,
+                'lon': lon,
+                'bearing_to_sea': bearing,
+                'score': 0,
+                'distance_to_fish': 0,
+                'direction_to_fish': 0,
+                'species': self._get_species(lat),
+                'zone': zone_name
+            }
+            new_spots.append(spot)
+            self.sampled_spots.append(spot)
+
+        return new_spots
 
     def fetch_marine_data(self) -> int:
         """Fetch marine data and generate flow lines following coast contour."""
@@ -535,10 +634,20 @@ class AnalysisController:
         n_points = self.load_coastline(coastline_path)
         print(f"      {n_points} puntos cargados")
 
-        # 2. Sample spots
+        # 2. Sample spots with focus on key areas
         print("\n[2/8] Muestreando puntos de pesca...")
-        spots = self.sample_fishing_spots()
-        print(f"      {len(spots)} spots muestreados")
+        # Base sampling along entire coast
+        spots = self.sample_fishing_spots(spacing_m=750, max_spots=150)
+        print(f"      {len(spots)} spots base")
+
+        # Add dense sampling around Playa Canepa (500m spacing)
+        canepa_spots = self._add_focus_zone_spots(
+            center_lat=-18.018, center_lon=-70.251,
+            radius_km=2.0, spacing_m=500,
+            zone_name="Playa Canepa"
+        )
+        print(f"      +{len(canepa_spots)} spots zona Canepa (500m)")
+        print(f"      {len(self.sampled_spots)} spots total")
 
         # 3. Generate fish zones
         print("\n[3/8] Generando zonas de peces...")
@@ -709,8 +818,14 @@ class AnalysisController:
         return result
 
     def _perpendicular_to_sea(self, idx: int) -> float:
+        """
+        Calculate bearing perpendicular to coast pointing towards the sea.
+
+        In Peru's south coast (Tacna-Ilo), the Pacific Ocean is always to the WEST.
+        So the perpendicular direction should have a westward component (lon decreases).
+        """
         if len(self.coastline_points) < 2:
-            return 270
+            return 270  # Default: West
 
         idx = min(idx, len(self.coastline_points) - 1)
         if idx == 0:
@@ -725,13 +840,24 @@ class AnalysisController:
         perp2 = (coast_bearing - 90) % 360
 
         lat, lon = self.coastline_points[idx]
+
+        # Test both perpendicular directions - choose the one going towards sea (WEST)
         for perp in [perp1, perp2]:
-            rad = np.radians(perp)
-            test_lon = lon + 100 / (111000 * np.cos(np.radians(lat))) * np.sin(rad)
-            if test_lon < lon:
+            # Convert bearing to radians for trig
+            # Bearing: 0=N, 90=E, 180=S, 270=W
+            rad = np.radians(90 - perp)  # Convert to math angle (0=E, 90=N)
+
+            # Calculate test point 100m in this direction
+            dx = 100 * np.cos(rad)  # East-West component (+ = East)
+
+            # If dx is negative, we're going West (towards the ocean)
+            if dx < 0:
                 return perp
 
-        return perp1
+        # Fallback: return the one closer to 270 (West)
+        diff1 = min(abs(perp1 - 270), 360 - abs(perp1 - 270))
+        diff2 = min(abs(perp2 - 270), 360 - abs(perp2 - 270))
+        return perp1 if diff1 < diff2 else perp2
 
     def _distance_m(self, lat1, lon1, lat2, lon2) -> float:
         dlat = (lat2 - lat1) * 111000

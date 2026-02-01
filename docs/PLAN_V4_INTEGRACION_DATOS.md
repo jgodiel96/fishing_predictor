@@ -176,4 +176,14 @@ print(f'Tide phase: {results[0].get(\"tide_phase\", \"N/A\")}')
 
 ---
 
-*Última actualización: 2026-01-30*
+---
+
+## Siguiente Plan
+
+**Ver:** [PLAN_V5_LINEA_COSTERA_PRECISA.md](PLAN_V5_LINEA_COSTERA_PRECISA.md)
+
+V5 implementará línea costera precisa con verificación por Computer Vision.
+
+---
+
+*Última actualización: 2026-02-01*

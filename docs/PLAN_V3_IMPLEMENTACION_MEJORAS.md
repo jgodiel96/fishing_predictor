@@ -17,8 +17,9 @@
 | **V2** | Estado del Arte, validacion cientifica | ✅ Completado |
 | **V3** | Implementacion de mejoras tecnicas | ✅ Completado |
 | **V4** | Integración completa de datos al análisis principal | ✅ Completado |
+| **V5** | Línea costera precisa con verificación CV | ⏳ En progreso |
 
-**Siguiente Plan:** [Plan V4 - Integración de Datos](PLAN_V4_INTEGRACION_DATOS.md)
+**Siguiente Plan:** [Plan V5 - Línea Costera Precisa](PLAN_V5_LINEA_COSTERA_PRECISA.md)
 
 ---
 

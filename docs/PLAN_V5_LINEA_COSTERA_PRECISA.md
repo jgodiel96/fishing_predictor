@@ -26,7 +26,7 @@
 ## Objetivo
 
 Crear una **línea costera definitiva y permanente** que:
-1. Tenga puntos separados por **máximo 200 metros**
+1. Tenga puntos separados por **máximo 50 metros**
 2. Sea **verificada** mediante algoritmo de Computer Vision
 3. Compare **imagen satelital** vs **mapa simplificado** para validación
 4. Una vez validada, **no se modifique** (inmutable)
@@ -138,10 +138,10 @@ Crear una **línea costera definitiva y permanente** que:
 │                                                             │
 │  1. Douglas-Peucker simplificación (preservar forma)        │
 │                                                             │
-│  2. Garantizar espaciado ≤ 200m:                           │
+│  2. Garantizar espaciado ≤ 50m:                           │
 │     ┌─────────────────────────────────────────┐            │
 │     │ Para cada par de puntos consecutivos:   │            │
-│     │   Si distancia > 200m:                  │            │
+│     │   Si distancia > 50m:                  │            │
 │     │     Insertar puntos intermedios         │            │
 │     │     usando interpolación cúbica         │            │
 │     └─────────────────────────────────────────┘            │
@@ -161,8 +161,8 @@ Crear una **línea costera definitiva y permanente** que:
 │  ┌─────────────────────────────────────────┐               │
 │  │ VALIDACIONES AUTOMÁTICAS:               │               │
 │  │                                         │               │
-│  │ ✓ Espaciado máximo ≤ 200m              │               │
-│  │ ✓ Espaciado mínimo ≥ 50m               │               │
+│  │ ✓ Espaciado máximo ≤ 50m              │               │
+│  │ ✓ Espaciado mínimo ≥ 20m               │               │
 │  │ ✓ IoU promedio ≥ 85%                   │               │
 │  │ ✓ Sin puntos aislados                  │               │
 │  │ ✓ Continuidad de la línea              │               │
@@ -209,7 +209,7 @@ Crear una **línea costera definitiva y permanente** que:
 | # | Tarea | Archivo | Descripción |
 |---|-------|---------|-------------|
 | 3.1 | Filtrar puntos baja confianza | `coastline_refiner.py` | Umbral: 80% |
-| 3.2 | Interpolar gaps > 200m | `coastline_refiner.py` | Asegurar espaciado máximo |
+| 3.2 | Interpolar gaps > 50m | `coastline_refiner.py` | Asegurar espaciado máximo |
 | 3.3 | Suavizar curva | `coastline_refiner.py` | Eliminar ruido |
 | 3.4 | Ordenar geográficamente | `coastline_refiner.py` | Sur a norte |
 
@@ -217,7 +217,7 @@ Crear una **línea costera definitiva y permanente** que:
 
 | # | Tarea | Archivo | Descripción |
 |---|-------|---------|-------------|
-| 4.1 | Validar espaciado ≤ 200m | `coastline_validator.py` | Error si no cumple |
+| 4.1 | Validar espaciado ≤ 50m | `coastline_validator.py` | Error si no cumple |
 | 4.2 | Generar reporte de calidad | `coastline_validator.py` | Métricas y estadísticas |
 | 4.3 | Guardar en Gold layer | `coastline_validator.py` | Inmutable |
 | 4.4 | Crear checksum | `coastline_validator.py` | SHA256 para integridad |
@@ -307,7 +307,7 @@ VERIFICATION_CONFIG = {
 ```python
 REFINEMENT_CONFIG = {
     # Espaciado
-    'max_spacing_m': 200,             # MÁXIMO 200 metros
+    'max_spacing_m': 50,              # MÁXIMO 50 metros
     'min_spacing_m': 50,              # Mínimo 50 metros
     'target_spacing_m': 150,          # Objetivo ideal
 
@@ -353,7 +353,7 @@ core/
 ├── coastline_detector.py      # Fase 1: Detección HSV (existe)
 ├── coastline_sam.py           # Fase 1: Detección SAM (nuevo)
 ├── coastline_verifier.py      # Fase 2: Verificación dual (nuevo)
-├── coastline_refiner.py       # Fase 3: Refinamiento 200m (nuevo)
+├── coastline_refiner.py       # Fase 3: Refinamiento 50m (nuevo)
 ├── coastline_validator.py     # Fase 4: Validación (nuevo)
 └── coastline_pipeline.py      # Orquestador completo (nuevo)
 
@@ -530,12 +530,12 @@ def verify_coastline_dual_source(
     return verified_points
 ```
 
-### Algoritmo de Refinamiento con Espaciado ≤ 200m
+### Algoritmo de Refinamiento con Espaciado ≤ 50m
 
 ```python
 def ensure_max_spacing(
     coastline: List[Tuple[float, float]],
-    max_spacing_m: float = 200
+    max_spacing_m: float = 50
 ) -> List[Tuple[float, float]]:
     """
     Garantiza que ningún par de puntos consecutivos tenga más de max_spacing_m.
@@ -583,8 +583,8 @@ def ensure_max_spacing(
 
 | Criterio | Valor | Obligatorio |
 |----------|-------|-------------|
-| Espaciado máximo entre puntos | ≤ 200m | ✅ Sí |
-| Espaciado mínimo entre puntos | ≥ 50m | ✅ Sí |
+| Espaciado máximo entre puntos | ≤ 50m | ✅ Sí |
+| Espaciado mínimo entre puntos | ≥ 20m | ✅ Sí |
 | Confianza promedio de puntos | ≥ 85% | ✅ Sí |
 | Puntos con confianza < 70% | ≤ 5% | ✅ Sí |
 | Puntos en tierra (falsos) | 0% | ✅ Sí |
@@ -598,11 +598,11 @@ def ensure_max_spacing(
   "created_at": "2026-02-01T12:00:00Z",
   "checksum": "sha256:abc123...",
   "statistics": {
-    "total_points": 4500,
+    "total_points": 1800,
     "total_length_km": 90.5,
-    "avg_spacing_m": 180,
-    "max_spacing_m": 198,
-    "min_spacing_m": 52,
+    "avg_spacing_m": 45,
+    "max_spacing_m": 49,
+    "min_spacing_m": 22,
     "avg_confidence": 0.91,
     "points_below_80_confidence": 42,
     "coverage_percent": 98.5
@@ -637,7 +637,7 @@ python core/coastline_detector.py --zoom 16 --spacing 100
 python core/coastline_verifier.py --input detected.geojson
 
 # Solo refinamiento (Fase 3)
-python core/coastline_refiner.py --max-spacing 200
+python core/coastline_refiner.py --max-spacing 50
 
 # Solo validación (Fase 4)
 python core/coastline_validator.py --input refined.geojson
@@ -663,7 +663,7 @@ python core/coastline_validator.py --input refined.geojson
 | Tiles satelitales no disponibles | Cache local + fallback a OSM |
 | Nubes en imagen satelital | Usar múltiples fechas |
 | Mapa calle incompleto | Priorizar verificación satelital |
-| Espaciado > 200m en algunos tramos | Interpolación automática |
+| Espaciado > 50m en algunos tramos | Interpolación automática |
 
 ---
 
@@ -671,9 +671,9 @@ python core/coastline_validator.py --input refined.geojson
 
 ```
 data/gold/coastline/coastline_v1.geojson
-├── ~4500 puntos
-├── Espaciado máximo: 200m
-├── Espaciado promedio: ~180m
+├── ~1800 puntos
+├── Espaciado máximo: 50m
+├── Espaciado promedio: ~45m
 ├── Cobertura: Tacna-Ilo-Sama completo
 ├── Verificado por CV: Sí
 └── Inmutable: Sí (con checksum)

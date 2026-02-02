@@ -124,25 +124,32 @@ class AnalysisController:
         self.conditions: Dict = {}
 
     def load_coastline(self, geojson_path: str) -> int:
-        """Load coastline from GeoJSON file."""
+        """Load coastline from GeoJSON file.
+
+        Supports both LineString and MultiLineString geometries.
+        Preserves segment order (no sorting) to maintain coastline continuity.
+        """
         with open(geojson_path, 'r') as f:
             data = json.load(f)
 
         self.coastline_points = []
+        self.coastline_segments = []  # Store separate segments
+
         for feature in data.get('features', []):
             geom = feature.get('geometry', {})
-            coords = []
 
             if geom.get('type') == 'LineString':
-                coords = geom.get('coordinates', [])
+                segment = [(coord[1], coord[0]) for coord in geom.get('coordinates', [])]
+                self.coastline_segments.append(segment)
+                self.coastline_points.extend(segment)
+
             elif geom.get('type') == 'MultiLineString':
                 for line in geom.get('coordinates', []):
-                    coords.extend(line)
+                    segment = [(coord[1], coord[0]) for coord in line]
+                    self.coastline_segments.append(segment)
+                    self.coastline_points.extend(segment)
 
-            for coord in coords:
-                self.coastline_points.append((coord[1], coord[0]))  # lat, lon
-
-        self.coastline_points.sort(key=lambda x: x[0])
+        # Remove duplicates within each segment while preserving order
         self.coastline_points = self._remove_duplicates(self.coastline_points)
 
         return len(self.coastline_points)
@@ -150,6 +157,9 @@ class AnalysisController:
     def sample_fishing_spots(self, num_spots: int = None, spacing_m: int = 750, max_spots: int = 200) -> List[Dict]:
         """
         Sample spots along the coastline with specified spacing.
+
+        Samples from each coastline segment separately to maintain geographic
+        continuity and avoid creating connections between distant segments.
 
         Args:
             num_spots: Fixed number of spots (if provided, overrides spacing)
@@ -163,42 +173,66 @@ class AnalysisController:
         if not self.coastline_points:
             return []
 
-        # Calculate coastline length to determine number of spots
-        if num_spots is None:
-            total_length_m = 0
-            for i in range(1, len(self.coastline_points)):
-                p1 = self.coastline_points[i-1]
-                p2 = self.coastline_points[i]
+        # Use segments if available, otherwise treat all points as one segment
+        segments = getattr(self, 'coastline_segments', None)
+        if not segments or len(segments) == 0:
+            segments = [self.coastline_points]
+
+        # Calculate length of each segment
+        segment_lengths = []
+        for segment in segments:
+            seg_length = 0
+            for i in range(1, len(segment)):
+                p1 = segment[i-1]
+                p2 = segment[i]
                 dist = self._distance_m(p1[0], p1[1], p2[0], p2[1])
-                # Only count segments < 10km (ignore gaps)
+                # Only count connections < 10km (ignore gaps within segment)
                 if dist < 10000:
-                    total_length_m += dist
+                    seg_length += dist
+            segment_lengths.append(seg_length)
 
-            # Calculate number of spots based on spacing
+        total_length_m = sum(segment_lengths)
+
+        # Calculate number of spots based on spacing
+        if num_spots is None:
             num_spots = max(10, min(max_spots, int(total_length_m / spacing_m)))
-            actual_spacing = total_length_m / num_spots if num_spots > 0 else spacing_m
-            print(f"[INFO] Costa: {total_length_m/1000:.1f}km, espaciado efectivo: {actual_spacing:.0f}m, spots: {num_spots}")
 
-        if len(self.coastline_points) <= num_spots:
-            indices = range(len(self.coastline_points))
-        else:
-            indices = np.linspace(0, len(self.coastline_points) - 1, num_spots, dtype=int)
+        actual_spacing = total_length_m / num_spots if num_spots > 0 else spacing_m
+        print(f"[INFO] Costa: {total_length_m/1000:.1f}km ({len(segments)} segmentos), espaciado: {actual_spacing:.0f}m, spots: {num_spots}")
 
+        # Distribute spots proportionally to each segment's length
         self.sampled_spots = []
-        for i, idx in enumerate(indices):
-            lat, lon = self.coastline_points[idx]
-            bearing = self._perpendicular_to_sea(idx)
+        spot_id = 1
 
-            self.sampled_spots.append({
-                'id': i + 1,
-                'lat': lat,
-                'lon': lon,
-                'bearing_to_sea': bearing,
-                'score': 0,
-                'distance_to_fish': 0,
-                'direction_to_fish': 0,
-                'species': self._get_species(lat)
-            })
+        for seg_idx, (segment, seg_length) in enumerate(zip(segments, segment_lengths)):
+            if seg_length == 0 or len(segment) < 2:
+                continue
+
+            # Calculate spots for this segment proportionally
+            seg_spots = max(1, int(num_spots * (seg_length / total_length_m)))
+
+            # Sample points within this segment
+            if len(segment) <= seg_spots:
+                seg_indices = range(len(segment))
+            else:
+                seg_indices = np.linspace(0, len(segment) - 1, seg_spots, dtype=int)
+
+            for local_idx in seg_indices:
+                lat, lon = segment[local_idx]
+                bearing = self._perpendicular_to_sea_segment(segment, local_idx)
+
+                self.sampled_spots.append({
+                    'id': spot_id,
+                    'lat': lat,
+                    'lon': lon,
+                    'bearing_to_sea': bearing,
+                    'score': 0,
+                    'distance_to_fish': 0,
+                    'direction_to_fish': 0,
+                    'species': self._get_species(lat),
+                    'segment': seg_idx
+                })
+                spot_id += 1
 
         return self.sampled_spots
 
@@ -213,6 +247,8 @@ class AnalysisController:
         """
         Add dense sampling spots around a focus zone.
 
+        Uses segments to calculate correct perpendicular bearings.
+
         Args:
             center_lat, center_lon: Center of focus zone
             radius_km: Radius of focus zone in km
@@ -222,12 +258,17 @@ class AnalysisController:
         Returns:
             List of new spots added
         """
-        # Find coastline points within the focus zone
-        zone_points = []
-        for i, (lat, lon) in enumerate(self.coastline_points):
-            dist = self._distance_m(lat, lon, center_lat, center_lon)
-            if dist <= radius_km * 1000:
-                zone_points.append((i, lat, lon))
+        segments = getattr(self, 'coastline_segments', None)
+        if not segments:
+            segments = [self.coastline_points]
+
+        # Find coastline points within the focus zone, tracking their segment
+        zone_points = []  # (segment, local_idx, lat, lon)
+        for seg_idx, segment in enumerate(segments):
+            for local_idx, (lat, lon) in enumerate(segment):
+                dist = self._distance_m(lat, lon, center_lat, center_lon)
+                if dist <= radius_km * 1000:
+                    zone_points.append((segment, local_idx, lat, lon))
 
         if not zone_points:
             print(f"[WARN] No hay puntos de costa en zona {zone_name}")
@@ -238,7 +279,10 @@ class AnalysisController:
         for i in range(1, len(zone_points)):
             p1 = zone_points[i-1]
             p2 = zone_points[i]
-            zone_length_m += self._distance_m(p1[1], p1[2], p2[1], p2[2])
+            # Only count if same segment or close
+            dist = self._distance_m(p1[2], p1[3], p2[2], p2[3])
+            if dist < 1000:  # Don't count jumps between segments
+                zone_length_m += dist
 
         num_zone_spots = max(5, int(zone_length_m / spacing_m))
 
@@ -252,8 +296,8 @@ class AnalysisController:
         start_id = len(self.sampled_spots) + 1
 
         for j, zi in enumerate(zone_indices):
-            orig_idx, lat, lon = zone_points[zi]
-            bearing = self._perpendicular_to_sea(orig_idx)
+            segment, local_idx, lat, lon = zone_points[zi]
+            bearing = self._perpendicular_to_sea_segment(segment, local_idx)
 
             spot = {
                 'id': start_id + j,
@@ -272,25 +316,56 @@ class AnalysisController:
         return new_spots
 
     def fetch_marine_data(self) -> int:
-        """Fetch marine data and generate flow lines following coast contour."""
+        """Fetch marine data and generate flow lines following coast contour.
+
+        Samples from each coastline segment separately to ensure correct
+        perpendicular bearings (no cross-segment calculations).
+        """
         print("[INFO] Generando muestreo paralelo a la costa...")
 
-        coast_step = max(1, len(self.coastline_points) // 25)
-        coast_samples = self.coastline_points[::coast_step]
+        # Use segments if available
+        segments = getattr(self, 'coastline_segments', None)
+        if not segments or len(segments) == 0:
+            segments = [self.coastline_points]
 
-        # Generate offshore points perpendicular to coast
+        # Sample ~25 points total, distributed across segments by length
+        target_samples = 25
         offshore_km = [3, 8, 15, 25]
         sample_points = []
 
-        for i, (lat, lon) in enumerate(coast_samples):
-            bearing = self._perpendicular_to_sea(i * coast_step)
-            for dist in offshore_km:
-                rad = np.radians(bearing)
-                new_lat = lat + dist / 111.0 * np.cos(rad)
-                new_lon = lon + dist / 111.0 * np.sin(rad) / np.cos(np.radians(lat))
-                sample_points.append((new_lat, new_lon))
+        # Calculate total coastline length
+        segment_lengths = []
+        for segment in segments:
+            seg_len = 0
+            for i in range(1, len(segment)):
+                seg_len += self._distance_m(segment[i-1][0], segment[i-1][1],
+                                           segment[i][0], segment[i][1])
+            segment_lengths.append(seg_len)
 
-        print(f"[INFO] Muestreando {len(sample_points)} puntos...")
+        total_length = sum(segment_lengths)
+        if total_length == 0:
+            return 0
+
+        # Sample from each segment proportionally
+        for seg_idx, (segment, seg_len) in enumerate(zip(segments, segment_lengths)):
+            if len(segment) < 3 or seg_len < 1000:  # Skip very short segments
+                continue
+
+            # Number of samples for this segment
+            seg_samples = max(1, int(target_samples * (seg_len / total_length)))
+            step = max(1, len(segment) // seg_samples)
+
+            for local_idx in range(0, len(segment), step):
+                lat, lon = segment[local_idx]
+                bearing = self._perpendicular_to_sea_segment(segment, local_idx)
+
+                for dist in offshore_km:
+                    rad = np.radians(bearing)
+                    new_lat = lat + dist / 111.0 * np.cos(rad)
+                    new_lon = lon + dist / 111.0 * np.sin(rad) / np.cos(np.radians(lat))
+                    sample_points.append((new_lat, new_lon))
+
+        print(f"[INFO] Muestreando {len(sample_points)} puntos desde {len(segments)} segmentos...")
 
         self.marine_fetcher = MarineDataFetcher()
         self.current_vectors = self.marine_fetcher.fetch_current_vectors(sample_points)
@@ -574,7 +649,9 @@ class AnalysisController:
         )
 
         self.map_view.create_map(center=center, zoom=10)
-        self.map_view.add_coastline(self.coastline_points)
+        # Pass segments to draw each coastline section separately
+        segments = getattr(self, 'coastline_segments', None)
+        self.map_view.add_coastline(self.coastline_points, segments=segments)
         self.map_view.add_fish_zones(self.fish_zones)
         self.map_view.add_flow_lines(self.flow_lines, self.current_vectors)
         self.map_view.add_marine_points(self.marine_points)
@@ -852,6 +929,46 @@ class AnalysisController:
 
             # If dx is negative, we're going West (towards the ocean)
             if dx < 0:
+                return perp
+
+        # Fallback: return the one closer to 270 (West)
+        diff1 = min(abs(perp1 - 270), 360 - abs(perp1 - 270))
+        diff2 = min(abs(perp2 - 270), 360 - abs(perp2 - 270))
+        return perp1 if diff1 < diff2 else perp2
+
+    def _perpendicular_to_sea_segment(self, segment: List[Tuple[float, float]], idx: int) -> float:
+        """
+        Calculate bearing perpendicular to coast using only points from the same segment.
+
+        This prevents incorrect bearings when coastline has multiple disconnected segments.
+
+        Args:
+            segment: List of (lat, lon) points for a single coastline segment
+            idx: Index within the segment
+
+        Returns:
+            Bearing in degrees pointing towards the sea (westward)
+        """
+        if len(segment) < 2:
+            return 270  # Default: West
+
+        idx = min(idx, len(segment) - 1)
+        if idx == 0:
+            p1, p2 = segment[0], segment[1]
+        elif idx >= len(segment) - 1:
+            p1, p2 = segment[-2], segment[-1]
+        else:
+            p1, p2 = segment[idx - 1], segment[idx + 1]
+
+        coast_bearing = self._bearing(p1[0], p1[1], p2[0], p2[1])
+        perp1 = (coast_bearing + 90) % 360
+        perp2 = (coast_bearing - 90) % 360
+
+        # Test both perpendicular directions - choose the one going towards sea (WEST)
+        for perp in [perp1, perp2]:
+            rad = np.radians(90 - perp)
+            dx = 100 * np.cos(rad)
+            if dx < 0:  # Going West = towards ocean
                 return perp
 
         # Fallback: return the one closer to 270 (West)

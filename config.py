@@ -101,8 +101,8 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 GOLD_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_OUTPUT_FILE = "fishing_map.html"
-# V5: Use refined coastline from Gold layer (6,732 points, 50m max spacing)
-COASTLINE_FILE = GOLD_DIR / "coastline" / "coastline_v1.geojson"
+# V5: Use cleaned coastline from Gold layer (47 segments, no jumps > 500m)
+COASTLINE_FILE = GOLD_DIR / "coastline" / "coastline_v2.geojson"
 
 
 # =============================================================================

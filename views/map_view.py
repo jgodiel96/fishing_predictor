@@ -87,18 +87,39 @@ class MapView:
 
         return self.map
 
-    def add_coastline(self, points: List[Tuple[float, float]]):
-        """Add coastline polyline."""
-        if not self.map or not points:
+    def add_coastline(self, points: List[Tuple[float, float]], segments: List[List[Tuple[float, float]]] = None):
+        """Add coastline polyline(s).
+
+        Args:
+            points: List of all coastline points (for backward compatibility)
+            segments: Optional list of separate coastline segments. If provided,
+                     each segment is drawn as a separate polyline to avoid
+                     connecting geographically distant segments.
+        """
+        if not self.map:
             return
 
-        folium.PolyLine(
-            locations=points,
-            color=self.COLORS['coast'],
-            weight=3,
-            opacity=0.9,
-            popup=f"Costa OSM ({len(points)} puntos)"
-        ).add_to(self.map)
+        # If segments are provided, draw each separately
+        if segments and len(segments) > 0:
+            for i, segment in enumerate(segments):
+                if len(segment) < 2:
+                    continue
+                folium.PolyLine(
+                    locations=segment,
+                    color=self.COLORS['coast'],
+                    weight=3,
+                    opacity=0.9,
+                    popup=f"Segmento {i+1} ({len(segment)} puntos)"
+                ).add_to(self.map)
+        elif points:
+            # Legacy: single polyline for all points
+            folium.PolyLine(
+                locations=points,
+                color=self.COLORS['coast'],
+                weight=3,
+                opacity=0.9,
+                popup=f"Costa OSM ({len(points)} puntos)"
+            ).add_to(self.map)
 
     def add_fish_zones(self, zones: List[Dict]):
         """Add fish zone circles with movement arrows."""

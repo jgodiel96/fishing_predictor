@@ -461,6 +461,12 @@ class FeatureExtractor:
         blows from south (parallel to coast), causing offshore
         Ekman transport and upwelling of cold, nutrient-rich water.
         """
+        # Handle None values with regional defaults
+        if wind_speed is None:
+            wind_speed = 5.0  # Moderate wind default for Peru coast
+        if wind_direction is None:
+            wind_direction = 180.0  # South wind default
+
         # Coriolis parameter
         omega = 7.2921e-5  # Earth's rotation rate
         f = 2 * omega * np.sin(np.radians(lat))

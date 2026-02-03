@@ -1,7 +1,7 @@
 # Progreso: Corrección de Visualización de Costa
 
-**Fecha**: 2026-02-02
-**Estado**: ✅ COMPLETADO (v5.1)
+**Fecha**: 2026-02-03
+**Estado**: ✅ COMPLETADO (v8)
 
 ---
 
@@ -177,3 +177,109 @@ El análisis se ejecuta correctamente:
 - 2974 puntos únicos cargados (después de deduplicación)
 - 34 segmentos continuos
 - Mapa generado sin líneas cruzando tierra
+
+---
+
+## Solución Final (v8) - 2026-02-03
+
+### Datos de Costa Extendidos
+
+Se descargó costa extendida desde OSM con datos verificados:
+
+| Métrica | v3 | v8 |
+|---------|-----|-----|
+| Puntos | 2974 | 7741 |
+| Segmentos | 34 | 20 |
+| Longitud total | 248 km | 281 km |
+| Cobertura | Parcial | Completa Tacna-Ilo |
+
+### Hotspots Verificados
+
+Se eliminaron 4 hotspots falsos que fueron inventados incorrectamente:
+- ❌ Canepa Norte (no existe)
+- ❌ Canepa (ubicación incorrecta)
+- ❌ Canepa Sur (no existe)
+- ❌ Morro Sama (no existe)
+
+**Resultado**: 18 hotspots verificados basados en IMARPE y pescadores locales.
+
+### Filtrado por STUDY_AREA
+
+Se implementó filtrado para garantizar que todos los spots generados estén dentro del área de estudio definida:
+
+```python
+from domain import STUDY_AREA
+
+# En sample_fishing_spots():
+if not STUDY_AREA.contains(lat, lon):
+    continue  # Excluir puntos fuera del área
+```
+
+### Centralización de Configuración
+
+Se centralizó `LEGACY_DB` en `config.py` (antes estaba duplicada en 3 archivos):
+- `controllers/analysis.py`
+- `models/timeline.py`
+- `models/anchovy_migration.py`
+
+Se sincronizó `DEFAULT_BBOX` en `data/data_manager.py` con `STUDY_AREA` de `domain.py`.
+
+### Arquitectura Simplificada
+
+Scripts de procesamiento de costa movidos de `core/` a `scripts/coastline_processing/`:
+- `coastline_sam.py`
+- `coastline_connector.py`
+- `coastline_validator.py`
+- `coastline_pipeline.py`
+- `coastline_diagnostics.py`
+- `coastline_osm_extended.py`
+- `coastline_process_v6.py`
+- `coastline_visualization.py`
+- `coastline_process_v7.py`
+
+**Motivo**: Son scripts de procesamiento one-time, no módulos de runtime.
+
+### Búsqueda por Proximidad
+
+Nueva funcionalidad para buscar spots cerca de la ubicación del usuario:
+
+```bash
+# Buscar dentro de 10km de tu ubicación
+python main.py --lat -17.8 --lon -71.2
+
+# Buscar dentro de 5km
+python main.py --lat -17.8 --lon -71.2 --radius 5
+```
+
+**Archivos modificados**:
+- `main.py`: Argumentos CLI `--lat`, `--lon`, `--radius`
+- `controllers/analysis.py`: `_filter_spots_by_proximity()`, `_print_proximity_results()`
+- `views/map_view.py`: `add_user_location()` con marcador y círculo de radio
+
+### Archivos de Coastline Actuales
+
+```
+data/gold/coastline/
+├── coastline_v1.geojson     # Original (conexiones falsas)
+├── coastline_v2.geojson     # Intento manual (aún problemas)
+├── coastline_v3.geojson     # Algoritmo inteligente
+├── coastline_v4.geojson     # Mejoras menores
+├── coastline_v5.geojson     # Pre-extended
+├── coastline_v6.geojson     # Interim
+├── coastline_v7.geojson     # Interim
+├── coastline_v8_extended.geojson  # ✅ ACTUAL - 281km, 7741 puntos, 20 segmentos
+└── coastline_v8_extended.sha256
+```
+
+### Verificación Final
+
+```bash
+python main.py
+# Resultado:
+# - 7741 puntos de costa cargados
+# - 20 segmentos continuos
+# - 18 hotspots verificados
+# - Mapa generado correctamente
+# - Sin líneas cruzando tierra
+# - Filtro STUDY_AREA activo
+```

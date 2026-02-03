@@ -1,7 +1,7 @@
 # Development Guidelines - Fishing Predictor
 
-**Version**: 3.0
-**Fecha**: 2026-01-30
+**Version**: 3.1
+**Fecha**: 2026-02-03
 
 Este documento establece los lineamientos tecnicos y buenas practicas para el desarrollo del sistema de prediccion de pesca.
 
@@ -16,11 +16,14 @@ fishing_predictor/
 ├── models/          # Logica de negocio y ML
 ├── views/           # Renderizado (mapas, reportes)
 ├── controllers/     # Orquestacion de flujo
-├── core/            # Servicios de infraestructura
+├── core/            # Servicios de infraestructura (runtime)
+├── scripts/         # Scripts de utilidad y one-time processing
+│   └── coastline_processing/  # Scripts de procesamiento de costa
 ├── data/            # Acceso y gestion de datos
 │   ├── raw/         # Bronze Layer (inmutable)
 │   ├── processed/   # Silver Layer (regenerable)
 │   └── analytics/   # Gold Layer (ML-ready)
+├── config.py        # Configuracion centralizada (LEGACY_DB, paths)
 └── domain.py        # Constantes de dominio (CENTRAL)
 ```
 
@@ -56,6 +59,37 @@ raw_dir = DataConfig.RAW_GFW
 
 # INCORRECTO - Paths hardcodeados
 db_path = "data/processed/fishing.db"  # NO
+```
+
+### 1.4 Configuracion Global: `config.py`
+
+**Constantes compartidas entre modulos DEBEN definirse en `config.py`:**
+
+```python
+# CORRECTO - Importar desde config.py
+from config import LEGACY_DB, COASTLINE_FILE
+
+# INCORRECTO - Definir la misma constante en multiples archivos
+LEGACY_DB = PROJECT_ROOT / "data" / "real_only" / "real_data_100.db"  # NO - duplicado
+```
+
+### 1.5 Sincronizacion de Bounds
+
+**DEFAULT_BBOX y similares DEBEN sincronizarse con STUDY_AREA:**
+
+```python
+# CORRECTO - Usar STUDY_AREA como fuente unica
+from domain import STUDY_AREA
+
+DEFAULT_BBOX = {
+    "north": STUDY_AREA.north,
+    "south": STUDY_AREA.south,
+    "west": STUDY_AREA.west,
+    "east": STUDY_AREA.east
+}
+
+# INCORRECTO - Valores hardcodeados que pueden desincronizarse
+DEFAULT_BBOX = {"north": -17.50, "south": -18.25, ...}  # NO
 ```
 
 ---
@@ -477,3 +511,4 @@ python -m pytest tests/ -v
 ---
 
 *Lineamientos establecidos: 2026-01-30*
+*Ultima actualizacion: 2026-02-03*

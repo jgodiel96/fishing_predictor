@@ -2,7 +2,7 @@
 
 Sistema avanzado de prediccion de puntos optimos de pesca desde orilla para la costa sur de Peru (Tacna - Ilo).
 
-**Fecha de actualizacion:** 2026-01-30
+**Fecha de actualizacion:** 2026-02-03
 
 ## Caracteristicas Principales
 
@@ -23,8 +23,14 @@ Sistema avanzado de prediccion de puntos optimos de pesca desde orilla para la c
 - **Gradient Boosting**: Regresion para prediccion de zonas de pesca
 - **Modo Supervisado**: Entrenamiento con datos reales de pesca de GFW
 
+### Busqueda por Proximidad
+- **Buscar cerca de ti**: Especifica tu ubicacion (lat/lon) y radio de busqueda
+- **Resultados ordenados**: Por score de pesca y distancia a tu ubicacion
+- **Vista dual**: Muestra tanto spots cercanos como mejores spots globales
+- **Visualizacion en mapa**: Marcador de ubicacion y circulo de radio de busqueda
+
 ### Visualizacion
-- **Linea costera real**: 3,400+ puntos de OpenStreetMap
+- **Linea costera real**: 7,741 puntos de OpenStreetMap (coastline v8)
 - **Mapas interactivos**: Folium con capas de SST, corrientes y zonas de pesca
 - **Vectores de corriente**: Visualizacion de flujo oceanico
 
@@ -81,13 +87,15 @@ fishing_predictor/
 ├── core/
 │   ├── coastline_real.py      # Procesador de costa OSM
 │   ├── weather_solunar.py     # Clima y calculos solunares
-│   └── marine_data.py         # Datos marinos y frentes termicos
+│   ├── marine_data.py         # Datos marinos y frentes termicos
+│   └── verification_image.py  # Generador de imagenes de verificacion
 │
 ├── scripts/
 │   ├── download_incremental.py    # Descarga incremental de datos
 │   ├── update_database.py         # Actualizacion completa de BD
 │   ├── validate_data.py           # Validacion de integridad
-│   └── migrate_existing_data.py   # Migracion de datos legacy
+│   ├── migrate_existing_data.py   # Migracion de datos legacy
+│   └── coastline_processing/      # Scripts de procesamiento de costa (one-time)
 │
 ├── tests/                     # 18 tests unitarios
 │   └── test_models.py
@@ -153,6 +161,32 @@ python scripts/validate_data.py --all
 ```bash
 python main.py
 ```
+
+### Analisis para fecha especifica
+
+```bash
+python main.py --date 2026-02-15
+```
+
+### Busqueda por Proximidad
+
+Busca los mejores spots cerca de tu ubicacion:
+
+```bash
+# Buscar dentro de 10km de tu ubicacion (default)
+python main.py --lat -17.8 --lon -71.2
+
+# Buscar dentro de 5km
+python main.py --lat -17.8 --lon -71.2 --radius 5
+
+# Combinar con fecha especifica
+python main.py --lat -17.8 --lon -71.2 --radius 15 --date 2026-02-10
+```
+
+El sistema mostrara:
+1. **Spots cercanos**: Ordenados por score y distancia a tu ubicacion
+2. **Mejores spots globales**: Top 10 en toda el area de estudio con distancia a ti
+3. **Mapa interactivo**: Con tu ubicacion marcada y circulo de radio de busqueda
 
 ### Analisis con ML Supervisado (requiere datos historicos)
 
@@ -310,4 +344,4 @@ Desarrollado para pesca con spinning desde orilla en la costa sur de Peru.
 
 ---
 
-*Ultima actualizacion: 2026-01-30*
+*Ultima actualizacion: 2026-02-03*

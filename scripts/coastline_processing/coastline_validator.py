@@ -86,14 +86,58 @@ class CoastlineValidator:
 
     def check_spacing(
         self,
-        points: List[Tuple[float, float]]
+        points: List[Tuple[float, float]],
+        segments: List[List[Tuple[float, float]]] = None
     ) -> Tuple[bool, Dict]:
         """
         Check spacing requirements.
 
+        If segments are provided, validates spacing within each segment
+        without counting inter-segment gaps as violations.
+
         Returns:
             Tuple of (passed, statistics)
         """
+        if segments and len(segments) > 0:
+            # Validate each segment separately
+            all_distances = []
+            all_violations = []
+            total_points = 0
+
+            for seg_idx, seg in enumerate(segments):
+                total_points += len(seg)
+                for i in range(1, len(seg)):
+                    dist = self.haversine_distance(
+                        seg[i-1][0], seg[i-1][1],
+                        seg[i][0], seg[i][1]
+                    )
+                    all_distances.append(dist)
+
+                    if dist > self.config.max_spacing_m:
+                        all_violations.append({
+                            "segment": seg_idx,
+                            "index": i,
+                            "distance_m": dist,
+                            "type": "too_far"
+                        })
+
+            if not all_distances:
+                return False, {"error": "Not enough points in segments"}
+
+            stats = {
+                "total_points": total_points,
+                "num_segments": len(segments),
+                "avg_spacing_m": sum(all_distances) / len(all_distances),
+                "max_spacing_m": max(all_distances),
+                "min_spacing_m": min(all_distances),
+                "violations": len(all_violations),
+                "violation_details": all_violations[:10]
+            }
+
+            passed = len(all_violations) == 0
+            return passed, stats
+
+        # Legacy single-line validation
         if len(points) < 2:
             return False, {"error": "Not enough points"}
 
@@ -273,7 +317,8 @@ class CoastlineValidator:
     def validate(
         self,
         points: List[Tuple[float, float]],
-        confidence_scores: List[float] = None
+        confidence_scores: List[float] = None,
+        segments: List[List[Tuple[float, float]]] = None
     ) -> ValidationResult:
         """
         Run full validation on coastline.
@@ -281,6 +326,7 @@ class CoastlineValidator:
         Args:
             points: List of (lat, lon) tuples
             confidence_scores: Optional list of confidence scores
+            segments: Optional list of segments (for proper spacing validation)
 
         Returns:
             ValidationResult with all check results
@@ -290,8 +336,8 @@ class CoastlineValidator:
         checks = {}
         all_stats = {}
 
-        # Check spacing
-        passed, stats = self.check_spacing(points)
+        # Check spacing (use segments if provided for accurate gap handling)
+        passed, stats = self.check_spacing(points, segments)
         checks["spacing"] = passed
         all_stats["spacing"] = stats
         if not passed:
@@ -361,16 +407,18 @@ class CoastlineValidator:
         points: List[Tuple[float, float]],
         validation_result: ValidationResult,
         output_dir: str = None,
-        version: str = None
+        version: str = None,
+        segments: List[List[Tuple[float, float]]] = None
     ) -> Dict[str, str]:
         """
         Save validated coastline to Gold layer with checksums.
 
         Args:
-            points: Validated coastline points
+            points: Validated coastline points (flattened)
             validation_result: Result of validation
             output_dir: Output directory (default: data/gold/coastline)
             version: Version string (default: v1)
+            segments: Optional list of segments for MultiLineString output
 
         Returns:
             Dict with paths to created files
@@ -385,24 +433,53 @@ class CoastlineValidator:
         if version is None:
             version = "v1"
 
-        # Create GeoJSON
-        coordinates = [[lon, lat] for lat, lon in points]
-        geojson = {
-            "type": "FeatureCollection",
-            "features": [{
-                "type": "Feature",
-                "geometry": {
-                    "type": "LineString",
-                    "coordinates": coordinates
-                },
-                "properties": {
-                    "name": "Verified Coastline",
-                    "version": version,
-                    "points": len(coordinates),
-                    "created_at": datetime.utcnow().isoformat() + "Z"
-                }
-            }]
-        }
+        # Create GeoJSON - use MultiLineString if segments provided
+        if segments and len(segments) > 0:
+            # MultiLineString format - preserves segment boundaries
+            coordinates = []
+            for seg in segments:
+                seg_coords = [[lon, lat] for lat, lon in seg]
+                coordinates.append(seg_coords)
+
+            total_points = sum(len(seg) for seg in segments)
+            geojson = {
+                "type": "FeatureCollection",
+                "features": [{
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "MultiLineString",
+                        "coordinates": coordinates
+                    },
+                    "properties": {
+                        "name": "Verified Coastline (Segmented)",
+                        "version": version,
+                        "num_segments": len(segments),
+                        "total_points": total_points,
+                        "points_per_segment": [len(seg) for seg in segments],
+                        "created_at": datetime.utcnow().isoformat() + "Z",
+                        "connector_version": "v5.1"
+                    }
+                }]
+            }
+        else:
+            # Single LineString format (legacy)
+            coordinates = [[lon, lat] for lat, lon in points]
+            geojson = {
+                "type": "FeatureCollection",
+                "features": [{
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": coordinates
+                    },
+                    "properties": {
+                        "name": "Verified Coastline",
+                        "version": version,
+                        "points": len(coordinates),
+                        "created_at": datetime.utcnow().isoformat() + "Z"
+                    }
+                }]
+            }
 
         # Save GeoJSON
         geojson_path = output_dir / f"coastline_{version}.geojson"

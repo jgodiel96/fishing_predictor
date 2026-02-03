@@ -1,7 +1,7 @@
 # Progreso: Corrección de Visualización de Costa
 
-**Fecha**: 2026-02-01
-**Estado**: EN PROGRESO
+**Fecha**: 2026-02-02
+**Estado**: ✅ COMPLETADO (v5.1)
 
 ---
 
@@ -119,8 +119,61 @@ fishing_predictor/
 
 ---
 
-## Decisión Pendiente
+## Solución Implementada (v5.1) - 2026-02-02
 
-**Pregunta**: ¿Eliminar los datos de Canepa (opción A) o regenerarlos correctamente (opción B/C)?
+### Problema Real Identificado
 
-La costa OSM (Ilo a Tacna) funciona correctamente. El problema está solo en los datos de Playa Canepa.
+El problema **no era solo Canepa**, sino el **algoritmo de conexión de puntos**. El código anterior usaba:
+```python
+points = sorted(set(points), key=lambda p: (p[0], p[1]))  # MALO
+```
+
+Esto creaba conexiones falsas entre puntos lejanos porque ordenaba por latitud sin considerar la proximidad geográfica real.
+
+### Solución: Algoritmo de Conexión Inteligente
+
+Se implementó `CoastlineConnector` en `core/coastline_connector.py` con:
+
+| Componente | Descripción |
+|------------|-------------|
+| `build_nearest_neighbor_chain()` | Construye cadena por vecino más cercano |
+| `detect_segments()` | Detecta gaps > 500m para separar segmentos |
+| `merge_segments()` | Une segmentos por extremos cercanos (< 1km) |
+| `remove_isolated_points()` | Elimina puntos de ruido |
+
+### Resultados
+
+| Métrica | Antes (v2) | Después (v3) |
+|---------|------------|--------------|
+| Puntos | 8320 | 8300 |
+| Segmentos | 47 (muchos corruptos) | 34 (todos válidos) |
+| Conexiones falsas | Sí | No |
+| Longitud total | N/A | 248.48 km |
+
+### Archivos Modificados/Creados
+
+| Archivo | Acción |
+|---------|--------|
+| `core/coastline_connector.py` | **NUEVO** - Algoritmo de conexión |
+| `core/coastline_sam.py` | Integración del conector |
+| `core/coastline_pipeline.py` | Fase 1.5 de conexión |
+| `core/coastline_validator.py` | Soporte para segmentos |
+| `config.py` | Actualizado a coastline_v3 |
+| `docs/PLAN_V5_LINEA_COSTERA_PRECISA.md` | Documentación v5.1 |
+
+### Archivos de Coastline
+
+```
+data/gold/coastline/
+├── coastline_v1.geojson     # Original (conexiones falsas)
+├── coastline_v2.geojson     # Intento manual (aún problemas)
+├── coastline_v3.geojson     # ✅ ACTUAL - Algoritmo inteligente
+└── coastline_v3.sha256      # Checksum
+```
+
+### Verificación
+
+El análisis se ejecuta correctamente:
+- 2974 puntos únicos cargados (después de deduplicación)
+- 34 segmentos continuos
+- Mapa generado sin líneas cruzando tierra

@@ -30,6 +30,11 @@ from core.coastline_sam import (
     check_sam_availability,
     print_sam_status
 )
+from core.coastline_connector import (
+    CoastlineConnector,
+    ConnectorConfig,
+    save_segments_as_geojson
+)
 from core.coastline_verifier import (
     CoastlineVerifier,
     VerificationConfig,
@@ -89,7 +94,8 @@ class CoastlinePipeline:
         use_sam: bool = True,
         verify: bool = True,
         refine: bool = True,
-        validate: bool = True
+        validate: bool = True,
+        use_connector: bool = True
     ):
         """
         Initialize pipeline.
@@ -99,20 +105,24 @@ class CoastlinePipeline:
             verify: Perform dual-source verification
             refine: Apply spacing refinement
             validate: Run final validation
+            use_connector: Use intelligent point connector (v5.1)
         """
         self.use_sam = use_sam
         self.verify = verify
         self.refine = refine
         self.validate_flag = validate
+        self.use_connector = use_connector
 
         # Components
         self.detector = SAMCoastlineDetector()
+        self.connector = CoastlineConnector()
         self.verifier = CoastlineVerifier()
         self.refiner = CoastlineRefiner()
         self.validator = CoastlineValidator()
 
         # Results storage
         self.raw_points = []
+        self.segments = []  # NEW: Store connected segments
         self.verified_points = []
         self.refined_points = []
         self.validation_result = None
@@ -153,6 +163,65 @@ class CoastlinePipeline:
         print(f"\nResultado: {len(self.raw_points)} puntos detectados")
         return self.raw_points
 
+    def connect_points(
+        self,
+        points: List[Tuple[float, float]] = None
+    ) -> List[List[Tuple[float, float]]]:
+        """
+        Phase 1.5: Connect detected points using intelligent algorithm.
+
+        This phase ensures points are connected correctly without creating
+        lines that cross land. It uses nearest-neighbor chains and segment
+        merging instead of simple latitude sorting.
+
+        Args:
+            points: Points to connect (uses self.raw_points if None)
+
+        Returns:
+            List of connected segments
+        """
+        if not self.use_connector:
+            # Skip connector, return points as single segment
+            points = points or self.raw_points
+            self.segments = [points] if points else []
+            return self.segments
+
+        print("\n" + "="*60)
+        print("FASE 1.5: CONEXION INTELIGENTE (v5.1)")
+        print("="*60)
+
+        points = points or self.raw_points
+        if not points:
+            print("[WARN] No points to connect")
+            self.segments = []
+            return []
+
+        # Configure connector
+        config = ConnectorConfig(
+            max_gap_m=500,
+            max_merge_distance_m=1000,
+            min_segment_points=3,
+            remove_isolated_points=True,
+            min_neighbors_radius_m=200,
+            min_neighbors_count=2
+        )
+        self.connector = CoastlineConnector(config)
+
+        # Connect points
+        self.segments = self.connector.connect(points)
+
+        # Statistics
+        stats = self.connector.get_connection_statistics(self.segments)
+        print(f"\nResultado de conexion:")
+        print(f"  Segmentos: {stats['num_segments']}")
+        print(f"  Puntos totales: {stats['total_points']}")
+        print(f"  Longitud total: {stats['total_length_km']:.2f} km")
+
+        if stats['num_segments'] > 0:
+            print(f"  Longitud promedio por segmento: {stats['avg_segment_length_km']:.2f} km")
+
+        return self.segments
+
     def verify_dual_source(
         self,
         points: List[Tuple[float, float]] = None
@@ -165,19 +234,28 @@ class CoastlinePipeline:
         requires more tile fetching.
 
         Args:
-            points: Points to verify (uses self.raw_points if None)
+            points: Points to verify (uses connected segments if None)
 
         Returns:
             List of verified points
         """
         if not self.verify:
+            # Use connected segments flattened, or raw points
+            if self.segments:
+                return [p for seg in self.segments for p in seg]
             return points or self.raw_points
 
         print("\n" + "="*60)
         print("FASE 2: VERIFICACION")
         print("="*60)
 
-        points = points or self.raw_points
+        # Get points from segments or raw
+        if points is None:
+            if self.segments:
+                points = [p for seg in self.segments for p in seg]
+            else:
+                points = self.raw_points
+
         if not points:
             print("[WARN] No points to verify")
             return []
@@ -261,7 +339,12 @@ class CoastlinePipeline:
             print("[ERROR] No points to validate")
             return None
 
-        self.validation_result = self.validator.validate(points, confidence_scores)
+        # Pass segments for proper spacing validation (gaps between segments are OK)
+        self.validation_result = self.validator.validate(
+            points,
+            confidence_scores,
+            segments=self.segments if self.segments else None
+        )
 
         print(f"\nResultados de validacion:")
         for check, passed in self.validation_result.checks.items():
@@ -292,6 +375,9 @@ class CoastlinePipeline:
         """
         Save to Gold layer.
 
+        Saves as MultiLineString if segments are available (preserving
+        segment boundaries), or as LineString if only flat points.
+
         Args:
             points: Points to save
             output_dir: Output directory
@@ -317,11 +403,16 @@ class CoastlinePipeline:
         if version is None:
             version = datetime.now().strftime("v%Y%m%d")
 
+        # Check if we have segments to save as MultiLineString
+        if self.segments and len(self.segments) > 1:
+            print(f"[INFO] Saving {len(self.segments)} segments as MultiLineString")
+
         return self.validator.save_to_gold(
             points=points,
             validation_result=self.validation_result,
             output_dir=output_dir,
-            version=version
+            version=version,
+            segments=self.segments if self.segments else None
         )
 
     def run(
@@ -344,7 +435,7 @@ class CoastlinePipeline:
             Dict with results and statistics
         """
         print("\n" + "#"*60)
-        print("# COASTLINE DETECTION PIPELINE")
+        print("# COASTLINE DETECTION PIPELINE (v5.1)")
         print("#"*60)
 
         start_time = datetime.now()
@@ -357,6 +448,9 @@ class CoastlinePipeline:
 
         # Phase 1: Detection
         self.detect(region_name, custom_region)
+
+        # Phase 1.5: Intelligent Connection (NEW in v5.1)
+        self.connect_points()
 
         # Phase 2: Verification
         self.verify_dual_source()
@@ -381,6 +475,7 @@ class CoastlinePipeline:
         print("#"*60)
         print(f"Tiempo total: {duration:.1f} segundos")
         print(f"Puntos detectados: {len(self.raw_points)}")
+        print(f"Segmentos conectados: {len(self.segments)}")
         print(f"Puntos refinados: {len(self.refined_points)}")
         if self.validation_result:
             print(f"Validacion: {'PASS' if self.validation_result.is_valid else 'FAIL'}")
@@ -388,6 +483,7 @@ class CoastlinePipeline:
 
         return {
             "raw_points": len(self.raw_points),
+            "num_segments": len(self.segments),
             "refined_points": len(self.refined_points),
             "validation": self.validation_result,
             "saved_files": saved_files,

@@ -25,6 +25,13 @@ from io import BytesIO
 ROOT_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
+# Import connector for intelligent point connection
+try:
+    from core.coastline_connector import CoastlineConnector, ConnectorConfig
+    CONNECTOR_AVAILABLE = True
+except ImportError:
+    CONNECTOR_AVAILABLE = False
+
 try:
     from PIL import Image
     PIL_AVAILABLE = True
@@ -470,26 +477,132 @@ class SAMCoastlineDetector:
         points: List[Tuple[float, float]],
         min_spacing_m: float
     ) -> List[Tuple[float, float]]:
-        """Remove duplicates and ensure minimum spacing."""
+        """
+        Clean and connect points using intelligent algorithm.
+
+        This replaces the old simple latitude-based sorting that caused
+        false connections crossing land.
+        """
         if not points:
             return []
 
-        # Remove duplicates and sort by latitude
-        points = sorted(set(points), key=lambda p: (p[0], p[1]))
+        # Remove exact duplicates
+        points = list(set(points))
 
-        # Filter by spacing
-        cleaned = [points[0]]
-        for lat, lon in points[1:]:
-            last_lat, last_lon = cleaned[-1]
+        if len(points) < 3:
+            return sorted(points, key=lambda p: (p[0], p[1]))
 
-            dlat = (lat - last_lat) * 111000
-            dlon = (lon - last_lon) * 111000 * math.cos(math.radians(lat))
-            dist = math.sqrt(dlat**2 + dlon**2)
+        # Use intelligent connector if available
+        if CONNECTOR_AVAILABLE:
+            print("[INFO] Using intelligent point connector...")
+            config = ConnectorConfig(
+                max_gap_m=500,
+                max_merge_distance_m=1000,
+                min_segment_points=3,
+                remove_isolated_points=True,
+                min_neighbors_radius_m=min_spacing_m * 4,
+                min_neighbors_count=2
+            )
+            connector = CoastlineConnector(config)
+            segments = connector.connect(points)
 
-            if dist >= min_spacing_m * 0.5:
-                cleaned.append((lat, lon))
+            # Flatten segments into single list for backward compatibility
+            # Each segment is properly ordered
+            cleaned = []
+            for seg in segments:
+                cleaned.extend(seg)
 
-        return cleaned
+            return cleaned
+        else:
+            print("[WARN] Connector not available, using legacy method")
+            # Fallback to old method (not recommended)
+            points = sorted(points, key=lambda p: (p[0], p[1]))
+
+            # Filter by spacing
+            cleaned = [points[0]]
+            for lat, lon in points[1:]:
+                last_lat, last_lon = cleaned[-1]
+
+                dlat = (lat - last_lat) * 111000
+                dlon = (lon - last_lon) * 111000 * math.cos(math.radians(lat))
+                dist = math.sqrt(dlat**2 + dlon**2)
+
+                if dist >= min_spacing_m * 0.5:
+                    cleaned.append((lat, lon))
+
+            return cleaned
+
+    def detect_coastline_segments(
+        self,
+        lat_min: float,
+        lat_max: float,
+        lon_min: float,
+        lon_max: float,
+        zoom: int = 15,
+        use_sam: bool = True,
+        min_spacing_m: float = 50
+    ) -> List[List[Tuple[float, float]]]:
+        """
+        Detect coastline and return as separate segments.
+
+        This is the preferred method as it preserves segment boundaries
+        and avoids false connections between distant parts of the coast.
+
+        Returns:
+            List of segments, each segment is a list of (lat, lon) points
+        """
+        print(f"[INFO] Detecting coastline segments with {'SAM' if use_sam else 'HSV'}:")
+        print(f"       Lat: {lat_min:.4f} to {lat_max:.4f}")
+        print(f"       Lon: {lon_min:.4f} to {lon_max:.4f}")
+        print(f"       Zoom: {zoom}")
+
+        # Get corner tiles
+        tile_nw = self.lat_lon_to_tile(lat_max, lon_min, zoom)
+        tile_se = self.lat_lon_to_tile(lat_min, lon_max, zoom)
+
+        all_points = []
+        total_tiles = (tile_se.x - tile_nw.x + 1) * (tile_se.y - tile_nw.y + 1)
+        processed = 0
+
+        for tx in range(tile_nw.x, tile_se.x + 1):
+            for ty in range(tile_nw.y, tile_se.y + 1):
+                tile = TileCoord(x=tx, y=ty, zoom=zoom)
+                processed += 1
+
+                points, _ = self.detect_coastline_for_tile(tile, use_sam=use_sam)
+
+                # Filter to region
+                for lat, lon in points:
+                    if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
+                        all_points.append((lat, lon))
+
+                if processed % 5 == 0:
+                    print(f"       Processed {processed}/{total_tiles} tiles...")
+
+        print(f"[OK] {len(all_points)} points detected")
+
+        if not all_points:
+            return []
+
+        # Remove duplicates
+        all_points = list(set(all_points))
+
+        # Use connector to build segments
+        if CONNECTOR_AVAILABLE:
+            config = ConnectorConfig(
+                max_gap_m=500,
+                max_merge_distance_m=1000,
+                min_segment_points=3,
+                remove_isolated_points=True,
+                min_neighbors_radius_m=min_spacing_m * 4,
+            )
+            connector = CoastlineConnector(config)
+            segments = connector.connect(all_points)
+            return segments
+        else:
+            # Fallback: return as single segment
+            sorted_points = sorted(all_points, key=lambda p: (p[0], p[1]))
+            return [sorted_points]
 
     def save_as_geojson(
         self,
@@ -497,7 +610,7 @@ class SAMCoastlineDetector:
         output_path: str,
         metadata: Dict = None
     ) -> str:
-        """Save coastline as GeoJSON file."""
+        """Save coastline as GeoJSON file (single LineString)."""
         coordinates = [[lon, lat] for lat, lon in coastline]
 
         properties = {
@@ -524,7 +637,55 @@ class SAMCoastlineDetector:
         with open(output_path, 'w') as f:
             json.dump(geojson, f, indent=2)
 
-        print(f"[OK] Guardado: {output_path}")
+        print(f"[OK] Saved: {output_path}")
+        return output_path
+
+    def save_segments_as_geojson(
+        self,
+        segments: List[List[Tuple[float, float]]],
+        output_path: str,
+        metadata: Dict = None
+    ) -> str:
+        """
+        Save coastline segments as GeoJSON MultiLineString.
+
+        This preserves segment boundaries to avoid visual artifacts
+        from false connections.
+        """
+        # Convert to GeoJSON coordinates (lon, lat)
+        coordinates = []
+        for seg in segments:
+            seg_coords = [[lon, lat] for lat, lon in seg]
+            coordinates.append(seg_coords)
+
+        total_points = sum(len(seg) for seg in segments)
+
+        properties = {
+            "name": "SAM Detected Coastline (Segmented)",
+            "source": "segment_anything_model",
+            "num_segments": len(segments),
+            "total_points": total_points,
+            "model": self.config.model_type
+        }
+        if metadata:
+            properties.update(metadata)
+
+        geojson = {
+            "type": "FeatureCollection",
+            "features": [{
+                "type": "Feature",
+                "geometry": {
+                    "type": "MultiLineString",
+                    "coordinates": coordinates
+                },
+                "properties": properties
+            }]
+        }
+
+        with open(output_path, 'w') as f:
+            json.dump(geojson, f, indent=2)
+
+        print(f"[OK] Saved: {output_path} ({len(segments)} segments, {total_points} points)")
         return output_path
 
 

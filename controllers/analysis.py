@@ -718,9 +718,10 @@ class AnalysisController:
         print(f"      {len(spots)} spots base")
 
         # Add dense sampling around Playa Canepa (500m spacing)
+        # Coordinates verified against OSM coastline v8 (2026-02-02)
         canepa_spots = self._add_focus_zone_spots(
-            center_lat=-18.018, center_lon=-70.251,
-            radius_km=2.0, spacing_m=500,
+            center_lat=-18.380, center_lon=-70.324,
+            radius_km=3.0, spacing_m=500,
             zone_name="Playa Canepa"
         )
         print(f"      +{len(canepa_spots)} spots zona Canepa (500m)")

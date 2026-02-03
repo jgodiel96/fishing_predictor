@@ -1,8 +1,8 @@
 # Plan V5: Línea Costera Precisa con Verificación por Computer Vision
 
-**Fecha:** 2026-02-01
-**Versión:** 5.0
-**Estado:** PENDIENTE
+**Fecha:** 2026-02-02
+**Versión:** 5.1
+**Estado:** EN PROGRESO
 **Prerequisitos:**
 - [Plan V1 - Arquitectura de Datos](PLAN_V1_ARQUITECTURA_DATOS.md) ✅ Completado
 - [Plan V2 - Validación Científica](PLAN_V2_VALIDACION_CIENTIFICA.md) ✅ Completado
@@ -29,7 +29,8 @@ Crear una **línea costera definitiva y permanente** que:
 1. Tenga puntos separados por **máximo 50 metros**
 2. Sea **verificada** mediante algoritmo de Computer Vision
 3. Compare **imagen satelital** vs **mapa simplificado** para validación
-4. Una vez validada, **no se modifique** (inmutable)
+4. **Conecte puntos correctamente** sin crear líneas que crucen tierra
+5. Una vez validada, **no se modifique** (inmutable)
 
 ---
 
@@ -41,6 +42,20 @@ Crear una **línea costera definitiva y permanente** que:
 | Detección satelital tiene ruido | Puntos incorrectos en tierra |
 | No hay verificación cruzada | Errores no detectados |
 | Espaciado irregular | Análisis inconsistente |
+| **Conexión incorrecta de puntos** | **Líneas que cruzan tierra** |
+
+### Problema Crítico: Conexión de Puntos (v5.1)
+
+El pipeline anterior usaba `sorted(points, key=lambda p: (p[0], p[1]))` para ordenar puntos por latitud. Esto **NO funciona** para una costa con curvas porque:
+
+1. Puntos de diferentes segmentos de costa se mezclan
+2. Se crean conexiones entre puntos lejanos
+3. Las líneas resultantes cruzan tierra
+
+**Solución v5.1**: Algoritmo de conexión inteligente usando:
+- Nearest Neighbor Chain (cadena por vecino más cercano)
+- Detección de segmentos discontinuos
+- Merge de segmentos por extremos cercanos
 
 ---
 
@@ -194,6 +209,16 @@ Crear una **línea costera definitiva y permanente** que:
 | 1.2 | Descargar tiles mapa calle | `coastline_detector.py` | OSM tiles para comparación |
 | 1.3 | Detectar agua en satelital | `coastline_detector.py` | HSV segmentation |
 | 1.4 | Extraer contornos | `coastline_detector.py` | OpenCV findContours |
+
+### Fase 1.5: Conexión Inteligente de Puntos (NUEVO v5.1)
+
+| # | Tarea | Archivo | Descripción |
+|---|-------|---------|-------------|
+| 1.5.1 | Crear clase `CoastlineConnector` | `coastline_connector.py` | Conexión inteligente |
+| 1.5.2 | `build_nearest_neighbor_chain()` | `coastline_connector.py` | Cadena por proximidad |
+| 1.5.3 | `detect_segments()` | `coastline_connector.py` | Separar en segmentos continuos |
+| 1.5.4 | `merge_segments()` | `coastline_connector.py` | Unir por extremos cercanos |
+| 1.5.5 | `order_points_along_coast()` | `coastline_connector.py` | Ordenar sur→norte |
 
 ### Fase 2: Verificación Cruzada (Computer Vision)
 
@@ -351,11 +376,12 @@ DEPENDENCIES = {
 ```
 core/
 ├── coastline_detector.py      # Fase 1: Detección HSV (existe)
-├── coastline_sam.py           # Fase 1: Detección SAM (nuevo)
-├── coastline_verifier.py      # Fase 2: Verificación dual (nuevo)
-├── coastline_refiner.py       # Fase 3: Refinamiento 50m (nuevo)
-├── coastline_validator.py     # Fase 4: Validación (nuevo)
-└── coastline_pipeline.py      # Orquestador completo (nuevo)
+├── coastline_sam.py           # Fase 1: Detección SAM (existe)
+├── coastline_connector.py     # Fase 1.5: Conexión inteligente (NUEVO v5.1)
+├── coastline_verifier.py      # Fase 2: Verificación dual (existe)
+├── coastline_refiner.py       # Fase 3: Refinamiento 50m (existe)
+├── coastline_validator.py     # Fase 4: Validación (existe)
+└── coastline_pipeline.py      # Orquestador completo (existe)
 
 models/
 └── sam/
@@ -530,6 +556,243 @@ def verify_coastline_dual_source(
     return verified_points
 ```
 
+### Algoritmo de Conexión Inteligente (NUEVO v5.1)
+
+```python
+class CoastlineConnector:
+    """
+    Conecta puntos de costa detectados de forma inteligente.
+
+    El problema: Los puntos vienen de múltiples tiles y no están ordenados.
+    Un simple sort por latitud crea conexiones falsas que cruzan tierra.
+
+    La solución: Usar algoritmo de vecino más cercano para construir
+    cadenas de puntos, detectar gaps para separar segmentos, y luego
+    unir segmentos por sus extremos más cercanos.
+    """
+
+    def __init__(self, config: ConnectorConfig = None):
+        self.config = config or ConnectorConfig()
+
+    def connect(self, points: List[Tuple[float, float]]) -> List[List[Tuple[float, float]]]:
+        """
+        Pipeline completo de conexión.
+
+        Args:
+            points: Lista desordenada de puntos (lat, lon)
+
+        Returns:
+            Lista de segmentos, cada uno una lista ordenada de puntos
+        """
+        # Paso 1: Construir cadena por vecino más cercano
+        chain = self.build_nearest_neighbor_chain(points)
+
+        # Paso 2: Detectar gaps y separar en segmentos
+        segments = self.detect_segments(chain)
+
+        # Paso 3: Ordenar cada segmento geográficamente
+        segments = [self.order_segment(seg) for seg in segments]
+
+        # Paso 4: Unir segmentos cercanos
+        merged = self.merge_segments(segments)
+
+        return merged
+
+    def build_nearest_neighbor_chain(
+        self,
+        points: List[Tuple[float, float]]
+    ) -> List[Tuple[float, float]]:
+        """
+        Construye una cadena de puntos conectando cada punto con su
+        vecino más cercano no visitado.
+
+        Complejidad: O(n²) - aceptable para ~10,000 puntos
+        """
+        if not points:
+            return []
+
+        # Usar KD-Tree para búsqueda eficiente
+        from scipy.spatial import KDTree
+
+        points_array = np.array(points)
+        tree = KDTree(points_array)
+
+        visited = set()
+        chain = []
+
+        # Empezar desde el punto más al sur
+        current_idx = np.argmin(points_array[:, 0])
+
+        while len(visited) < len(points):
+            visited.add(current_idx)
+            chain.append(points[current_idx])
+
+            # Buscar vecino más cercano no visitado
+            # Buscar en radio creciente
+            for k in range(2, len(points) + 1):
+                distances, indices = tree.query(points_array[current_idx], k=k)
+                for dist, idx in zip(distances[1:], indices[1:]):
+                    if idx not in visited:
+                        current_idx = idx
+                        break
+                else:
+                    continue
+                break
+            else:
+                # No hay más vecinos, buscar cualquier punto no visitado
+                for i in range(len(points)):
+                    if i not in visited:
+                        current_idx = i
+                        break
+
+        return chain
+
+    def detect_segments(
+        self,
+        chain: List[Tuple[float, float]],
+        max_gap_m: float = 500
+    ) -> List[List[Tuple[float, float]]]:
+        """
+        Detecta gaps en la cadena y separa en segmentos continuos.
+
+        Args:
+            chain: Cadena de puntos ordenados
+            max_gap_m: Distancia máxima entre puntos del mismo segmento
+
+        Returns:
+            Lista de segmentos
+        """
+        if len(chain) < 2:
+            return [chain] if chain else []
+
+        segments = []
+        current_segment = [chain[0]]
+
+        for i in range(1, len(chain)):
+            dist = self.haversine_distance(
+                chain[i-1][0], chain[i-1][1],
+                chain[i][0], chain[i][1]
+            )
+
+            if dist > max_gap_m:
+                # Gap detectado - nuevo segmento
+                if len(current_segment) >= 3:  # Mínimo 3 puntos
+                    segments.append(current_segment)
+                current_segment = [chain[i]]
+            else:
+                current_segment.append(chain[i])
+
+        # Agregar último segmento
+        if len(current_segment) >= 3:
+            segments.append(current_segment)
+
+        return segments
+
+    def merge_segments(
+        self,
+        segments: List[List[Tuple[float, float]]],
+        max_merge_distance_m: float = 1000
+    ) -> List[List[Tuple[float, float]]]:
+        """
+        Une segmentos cuyos extremos están cerca.
+
+        Usa un enfoque greedy: une los dos segmentos más cercanos
+        repetidamente hasta que no queden pares cercanos.
+        """
+        if len(segments) <= 1:
+            return segments
+
+        merged = list(segments)
+        changed = True
+
+        while changed and len(merged) > 1:
+            changed = False
+            best_pair = None
+            best_distance = float('inf')
+            best_config = None  # (seg1_end, seg2_end)
+
+            for i in range(len(merged)):
+                for j in range(i + 1, len(merged)):
+                    seg1, seg2 = merged[i], merged[j]
+
+                    # Probar 4 configuraciones de unión
+                    configs = [
+                        (seg1[-1], seg2[0], 'end-start'),   # seg1.end → seg2.start
+                        (seg1[-1], seg2[-1], 'end-end'),    # seg1.end → seg2.end (reverse seg2)
+                        (seg1[0], seg2[0], 'start-start'),  # seg1.start → seg2.start (reverse seg1)
+                        (seg1[0], seg2[-1], 'start-end'),   # seg1.start → seg2.end (reverse both)
+                    ]
+
+                    for p1, p2, config_type in configs:
+                        dist = self.haversine_distance(p1[0], p1[1], p2[0], p2[1])
+                        if dist < best_distance and dist < max_merge_distance_m:
+                            best_distance = dist
+                            best_pair = (i, j)
+                            best_config = config_type
+
+            if best_pair:
+                i, j = best_pair
+                seg1, seg2 = merged[i], merged[j]
+
+                # Unir según la configuración
+                if best_config == 'end-start':
+                    new_seg = seg1 + seg2
+                elif best_config == 'end-end':
+                    new_seg = seg1 + seg2[::-1]
+                elif best_config == 'start-start':
+                    new_seg = seg1[::-1] + seg2
+                else:  # start-end
+                    new_seg = seg2 + seg1
+
+                # Reemplazar segmentos
+                merged = [s for k, s in enumerate(merged) if k not in (i, j)]
+                merged.append(new_seg)
+                changed = True
+
+        return merged
+
+    def order_segment(
+        self,
+        segment: List[Tuple[float, float]]
+    ) -> List[Tuple[float, float]]:
+        """
+        Ordena un segmento de sur a norte (lat creciente).
+        """
+        if not segment:
+            return segment
+
+        # Determinar dirección predominante
+        start_lat = segment[0][0]
+        end_lat = segment[-1][0]
+
+        if start_lat > end_lat:
+            # El segmento va de norte a sur, invertir
+            return segment[::-1]
+
+        return segment
+```
+
+### Configuración del Conector
+
+```python
+@dataclass
+class ConnectorConfig:
+    """Configuración para el algoritmo de conexión."""
+
+    # Detección de segmentos
+    max_gap_m: float = 500          # Gap máximo dentro de un segmento
+    min_segment_points: int = 3     # Mínimo puntos para considerar segmento
+
+    # Merge de segmentos
+    max_merge_distance_m: float = 1000  # Distancia máxima para unir segmentos
+
+    # Filtrado
+    remove_isolated_points: bool = True
+    min_neighbors_radius_m: float = 200
+```
+
+---
+
 ### Algoritmo de Refinamiento con Espaciado ≤ 50m
 
 ```python
@@ -647,12 +910,13 @@ python core/coastline_validator.py --input refined.geojson
 
 ## Cronograma
 
-| Fase | Tareas | Estimación |
-|------|--------|------------|
-| 1 | Detección inicial | ✅ Completado |
-| 2 | Verificación CV | Pendiente |
-| 3 | Refinamiento | Pendiente |
-| 4 | Validación y guardado | Pendiente |
+| Fase | Tareas | Estado |
+|------|--------|--------|
+| 1 | Detección inicial (SAM/HSV) | ✅ Completado |
+| 1.5 | **Conexión inteligente de puntos** | ⏳ En progreso (v5.1) |
+| 2 | Verificación CV | ⏳ Pendiente |
+| 3 | Refinamiento | ✅ Completado |
+| 4 | Validación y guardado | ✅ Completado |
 
 ---
 
@@ -682,4 +946,5 @@ data/gold/coastline/coastline_v1.geojson
 ---
 
 *Plan V5 creado: 2026-02-01*
+*Plan V5.1 actualizado: 2026-02-02 (algoritmo de conexión inteligente)*
 *Proyecto: Fishing Predictor - Tacna/Ilo/Sama, Peru*

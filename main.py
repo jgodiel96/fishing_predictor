@@ -3,10 +3,12 @@
 Fishing Predictor - Main Entry Point (MVC Architecture)
 
 Usage:
-    python main.py                    # Run full analysis for today
-    python main.py --date 2026-02-15  # Run analysis for specific date
-    python main.py --test             # Run tests
-    python main.py --help             # Show help
+    python main.py                              # Run full analysis for today
+    python main.py --date 2026-02-15            # Run analysis for specific date
+    python main.py --lat -17.8 --lon -71.2      # Search near location (default 10km)
+    python main.py --lat -17.8 --lon -71.2 --radius 5  # Search within 5km
+    python main.py --test                       # Run tests
+    python main.py --help                       # Show help
 """
 
 import sys
@@ -18,12 +20,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 
-def run_analysis(target_date: str = None):
+def run_analysis(target_date: str = None, user_lat: float = None, user_lon: float = None, radius_km: float = 10.0):
     """Run full fishing spot analysis.
 
     Args:
         target_date: Optional date string (YYYY-MM-DD) for analysis.
-                    If None, uses current date.
+        user_lat: User's latitude for proximity search.
+        user_lon: User's longitude for proximity search.
+        radius_km: Search radius in kilometers (default 10km).
     """
     from controllers.analysis import AnalysisController
     from datetime import datetime
@@ -50,7 +54,17 @@ def run_analysis(target_date: str = None):
             print("Use formato YYYY-MM-DD (ejemplo: 2026-02-15)")
             return 1
 
-    results = controller.run_full_analysis(coastline_path, output_path, target_date=analysis_date)
+    # Set user location for proximity search
+    user_location = None
+    if user_lat is not None and user_lon is not None:
+        user_location = {'lat': user_lat, 'lon': user_lon, 'radius_km': radius_km}
+        print(f"Busqueda por proximidad: ({user_lat:.4f}, {user_lon:.4f}) radio {radius_km}km")
+
+    results = controller.run_full_analysis(
+        coastline_path, output_path,
+        target_date=analysis_date,
+        user_location=user_location
+    )
 
     # Open map in browser
     if results.get('map_path'):
@@ -138,6 +152,24 @@ def main():
         default=None,
         help='Target date for analysis (YYYY-MM-DD). Default: today'
     )
+    parser.add_argument(
+        '--lat',
+        type=float,
+        default=None,
+        help='Your latitude for proximity search (e.g., -17.8)'
+    )
+    parser.add_argument(
+        '--lon',
+        type=float,
+        default=None,
+        help='Your longitude for proximity search (e.g., -71.2)'
+    )
+    parser.add_argument(
+        '--radius',
+        type=float,
+        default=10.0,
+        help='Search radius in km (default: 10)'
+    )
 
     args = parser.parse_args()
 
@@ -148,7 +180,12 @@ def main():
     elif args.supervised:
         return run_supervised_analysis()
     else:
-        return run_analysis(target_date=args.date)
+        return run_analysis(
+            target_date=args.date,
+            user_lat=args.lat,
+            user_lon=args.lon,
+            radius_km=args.radius
+        )
 
 
 if __name__ == "__main__":

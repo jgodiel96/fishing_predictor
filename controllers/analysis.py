@@ -87,6 +87,7 @@ class AnalysisController:
         self.flow_lines: List[List[Tuple[float, float]]] = []
         self.current_vectors: List = []
         self.marine_points: List = []
+        self.user_location: Optional[Dict] = None  # For proximity search
 
         # Components
         self.marine_fetcher: Optional[MarineDataFetcher] = None
@@ -682,6 +683,14 @@ class AnalysisController:
         except Exception as e:
             print(f"[WARN] No se pudo agregar panel multi-dia: {e}")
 
+        # Add user location marker if proximity search is active
+        if self.user_location:
+            self.map_view.add_user_location(
+                self.user_location['lat'],
+                self.user_location['lon'],
+                self.user_location.get('radius_km', 10.0)
+            )
+
         self.map_view.finalize()
 
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -693,7 +702,8 @@ class AnalysisController:
         self,
         coastline_path: str,
         output_path: str = "output/analysis_map.html",
-        target_date: datetime = None
+        target_date: datetime = None,
+        user_location: Dict = None
     ) -> Dict:
         """Run complete analysis pipeline.
 
@@ -701,7 +711,11 @@ class AnalysisController:
             coastline_path: Path to coastline GeoJSON file
             output_path: Output HTML map path
             target_date: Optional datetime for analysis. If None, uses current datetime.
+            user_location: Optional dict with 'lat', 'lon', 'radius_km' for proximity search.
         """
+        # Store user location for proximity search
+        self.user_location = user_location
+
         # Use provided date or current datetime
         self.analysis_datetime = target_date if target_date else datetime.now()
         analysis_date_str = self.analysis_datetime.strftime('%Y-%m-%d')
@@ -760,8 +774,12 @@ class AnalysisController:
         print("\nGenerando mapa...")
         map_path = self.create_map(output_path)
 
-        # Print results
-        self._print_results(results[:5])
+        # Print results based on proximity search
+        if self.user_location:
+            nearby_spots = self._filter_spots_by_proximity(results)
+            self._print_proximity_results(results[:5], nearby_spots[:5])
+        else:
+            self._print_results(results[:5])
 
         print(f"\n{'=' * 60}")
         print(f"MAPA GUARDADO: {map_path}")
@@ -772,7 +790,8 @@ class AnalysisController:
             'zones': zones,
             'pca': pca_results,
             'conditions': conditions,
-            'map_path': map_path
+            'map_path': map_path,
+            'user_location': self.user_location
         }
 
     def generate_multiday_predictions(self, days: int = 7) -> List[Dict]:
@@ -1015,6 +1034,28 @@ class AnalysisController:
 
         return best_boost
 
+    def _filter_spots_by_proximity(self, spots: List[Dict]) -> List[Dict]:
+        """Filter and sort spots by distance to user location."""
+        if not self.user_location:
+            return spots
+
+        user_lat = self.user_location['lat']
+        user_lon = self.user_location['lon']
+        radius_km = self.user_location.get('radius_km', 10.0)
+        radius_m = radius_km * 1000
+
+        nearby = []
+        for spot in spots:
+            dist = self._distance_m(user_lat, user_lon, spot['lat'], spot['lon'])
+            if dist <= radius_m:
+                spot_copy = spot.copy()
+                spot_copy['distance_to_user'] = dist
+                nearby.append(spot_copy)
+
+        # Sort by score (best first), then by distance
+        nearby.sort(key=lambda x: (-x['score'], x['distance_to_user']))
+        return nearby
+
     def _print_results(self, top_spots: List[Dict]):
         print(f"\n{'=' * 60}")
         print("TOP 5 MEJORES PUNTOS DE PESCA")
@@ -1028,6 +1069,42 @@ class AnalysisController:
             if spot.get('species'):
                 names = [s['name'] for s in spot['species']]
                 print(f"   Especies: {', '.join(names)}")
+
+    def _print_proximity_results(self, global_spots: List[Dict], nearby_spots: List[Dict]):
+        """Print both global and nearby best spots."""
+        user_lat = self.user_location['lat']
+        user_lon = self.user_location['lon']
+        radius_km = self.user_location.get('radius_km', 10.0)
+
+        # Nearby spots
+        print(f"\n{'=' * 60}")
+        print(f"MEJORES SPOTS CERCANOS (dentro de {radius_km}km)")
+        print(f"Tu ubicacion: ({user_lat:.4f}, {user_lon:.4f})")
+        print("=" * 60)
+
+        if nearby_spots:
+            for i, spot in enumerate(nearby_spots):
+                emoji = "*" if i == 0 else "#"
+                dist_km = spot.get('distance_to_user', 0) / 1000
+                print(f"\n{emoji}{i+1} - Score: {spot['score']:.1f}/100 | Distancia: {dist_km:.1f}km")
+                print(f"   Coords: {spot['lat']:.6f}, {spot['lon']:.6f}")
+                if spot.get('species'):
+                    names = [s['name'] for s in spot['species']]
+                    print(f"   Especies: {', '.join(names)}")
+        else:
+            print(f"\nNo hay spots dentro de {radius_km}km de tu ubicacion.")
+            print("Intenta aumentar el radio con --radius")
+
+        # Global spots
+        print(f"\n{'-' * 60}")
+        print("MEJORES SPOTS GLOBALES (toda la costa)")
+        print("-" * 60)
+
+        for i, spot in enumerate(global_spots):
+            dist_to_user = self._distance_m(user_lat, user_lon, spot['lat'], spot['lon']) / 1000
+            emoji = "*" if i == 0 else "#"
+            print(f"\n{emoji}{i+1} - Score: {spot['score']:.1f}/100 | A {dist_to_user:.1f}km de ti")
+            print(f"   Coords: {spot['lat']:.6f}, {spot['lon']:.6f}")
 
     # === Fish Movement Prediction ===
 

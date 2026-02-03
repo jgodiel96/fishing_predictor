@@ -1226,6 +1226,53 @@ class MapView:
             ''')
         return ''.join(rows)
 
+    def add_user_location(self, lat: float, lon: float, radius_km: float = 10.0):
+        """Add user location marker and search radius circle.
+
+        Args:
+            lat: User's latitude
+            lon: User's longitude
+            radius_km: Search radius in kilometers
+        """
+        if not self.map:
+            return
+
+        # Create feature group for user location
+        fg = folium.FeatureGroup(name="Tu Ubicacion", show=True)
+
+        # Add circle for search radius
+        folium.Circle(
+            location=[lat, lon],
+            radius=radius_km * 1000,  # Convert to meters
+            color='#FF6B6B',
+            fill=True,
+            fill_color='#FF6B6B',
+            fill_opacity=0.1,
+            weight=2,
+            dash_array='5, 5',
+            popup=f'Radio de busqueda: {radius_km}km'
+        ).add_to(fg)
+
+        # Add marker for user location
+        folium.Marker(
+            location=[lat, lon],
+            popup=f'''
+                <div style="font-family: Arial; width: 150px;">
+                    <b>Tu Ubicacion</b><br>
+                    <small>Lat: {lat:.4f}</small><br>
+                    <small>Lon: {lon:.4f}</small><br>
+                    <small>Radio: {radius_km}km</small>
+                </div>
+            ''',
+            icon=folium.Icon(
+                color='red',
+                icon='user',
+                prefix='fa'
+            )
+        ).add_to(fg)
+
+        fg.add_to(self.map)
+
     def finalize(self) -> folium.Map:
         """Add layer control and return map."""
         if self.map:

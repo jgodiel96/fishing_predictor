@@ -8,13 +8,13 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional, NamedTuple
 from pathlib import Path
 
-# Import centralized data configuration
+# Import centralized configuration
+from config import LEGACY_DB
+
 try:
-    from data.data_config import DataConfig, LEGACY_DB
+    from data.data_config import DataConfig
 except ImportError:
-    # Fallback if data_config not available
     DataConfig = None
-    LEGACY_DB = Path("data/real_only/real_data_100.db")
 
 
 class DailyStats(NamedTuple):

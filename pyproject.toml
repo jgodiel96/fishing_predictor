@@ -1,0 +1,35 @@
+[project]
+name = "fishing_predictor"
+version = "1.0.0"
+description = "Sistema de predicción de pesca para la costa sur de Perú"
+authors = [
+    {name = "Jorge Godiel"}
+]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.21.0",
+    "pandas>=1.3.0",
+    "scikit-learn>=1.0.0",
+    "folium>=0.12.0",
+    "requests>=2.25.0",
+    "ephem>=4.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=3.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]
+exclude = ["tests*", "scripts*", "output*", "data*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

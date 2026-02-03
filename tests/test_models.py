@@ -4,11 +4,6 @@ Tests for ML models.
 
 import pytest
 import numpy as np
-import sys
-from pathlib import Path
-
-# Add parent to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from models.features import FeatureExtractor, MarineFeatures
 from models.predictor import FishingPredictor, PredictionResult

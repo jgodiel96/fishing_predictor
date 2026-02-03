@@ -16,10 +16,8 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-import sys
 
 # Import domain constants
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from domain import HOTSPOTS, SPECIES_BY_NAME, THRESHOLDS, ENDPOINTS
 
 

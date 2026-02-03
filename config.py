@@ -54,6 +54,9 @@ DEFAULT_OUTPUT_FILE = "fishing_map.html"
 # 20 segments, 281.4 km, 7741 points
 COASTLINE_FILE = GOLD_DIR / "coastline" / "coastline_v8_extended.geojson"
 
+# Database with historical data (single source of truth)
+LEGACY_DB = PROJECT_ROOT / "data" / "real_only" / "real_data_100.db"
+
 
 # =============================================================================
 # GRID CONFIGURATION

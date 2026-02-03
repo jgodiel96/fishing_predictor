@@ -13,6 +13,9 @@ from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 import hashlib
 
+# Import STUDY_AREA para mantener sincronizado el BBOX
+from domain import STUDY_AREA
+
 
 class DataManager:
     """
@@ -37,13 +40,13 @@ class DataManager:
         }
     }
 
-    # BBOX para costa sur de Perú (Tacna - Ilo - Sama - Canepa)
-    # Expandido para incluir Playa Canepa y zona de Sama
+    # BBOX sincronizado con STUDY_AREA de domain.py
+    # Incluye toda la costa: Ilo - Tacna - Canepa - Morro Sama
     DEFAULT_BBOX = {
-        "north": -17.50,
-        "south": -18.35,  # Más al sur
-        "west": -71.45,
-        "east": -70.10    # Más al este para incluir Playa Canepa (-70.25)
+        "north": STUDY_AREA.north,
+        "south": STUDY_AREA.south,
+        "west": STUDY_AREA.west,
+        "east": STUDY_AREA.east
     }
 
     def __init__(self, cache_dir: str = None):

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional
 
 # Import centralized configuration
-from config import LEGACY_DB
+from config import LEGACY_DB, STUDY_AREA
 
 try:
     from data.data_config import DataConfig
@@ -219,6 +219,11 @@ class AnalysisController:
 
             for local_idx in seg_indices:
                 lat, lon = segment[local_idx]
+
+                # Filter: only include spots within STUDY_AREA
+                if not STUDY_AREA.contains(lat, lon):
+                    continue
+
                 bearing = self._perpendicular_to_sea_segment(segment, local_idx)
 
                 self.sampled_spots.append({
@@ -715,17 +720,7 @@ class AnalysisController:
         print("\n[2/8] Muestreando puntos de pesca...")
         # Base sampling along entire coast
         spots = self.sample_fishing_spots(spacing_m=750, max_spots=150)
-        print(f"      {len(spots)} spots base")
-
-        # Add dense sampling around Playa Canepa (500m spacing)
-        # Coordinates verified against OSM coastline v8 (2026-02-02)
-        canepa_spots = self._add_focus_zone_spots(
-            center_lat=-18.380, center_lon=-70.324,
-            radius_km=3.0, spacing_m=500,
-            zone_name="Playa Canepa"
-        )
-        print(f"      +{len(canepa_spots)} spots zona Canepa (500m)")
-        print(f"      {len(self.sampled_spots)} spots total")
+        print(f"      {len(spots)} spots muestreados")
 
         # 3. Generate fish zones
         print("\n[3/8] Generando zonas de peces...")

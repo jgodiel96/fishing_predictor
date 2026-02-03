@@ -9,7 +9,13 @@ Author: Fishing Predictor Project
 Date: 2026-02-02
 """
 
+import sys
 from pathlib import Path
+
+# For standalone execution
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import json
 from typing import List, Tuple, Optional
 import numpy as np
@@ -175,4 +181,3 @@ def generate_canepa_detail(output_path: Optional[Path] = None) -> str:
 if __name__ == "__main__":
     print("Generating verification images...")
     generate_verification_image()
-    generate_canepa_detail()

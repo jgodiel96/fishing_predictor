@@ -10,6 +10,7 @@ from typing import List, Dict, Tuple, Optional
 
 # Import centralized configuration
 from config import LEGACY_DB, STUDY_AREA
+from domain import PERU_SOUTH_LIMIT
 
 try:
     from data.data_config import DataConfig
@@ -38,6 +39,27 @@ try:
 except ImportError:
     PHYSICS_AVAILABLE = False
 
+# Chlorophyll-a from Copernicus (V7)
+try:
+    from data.fetchers.copernicus_chlorophyll_fetcher import ChlorophyllFetcher
+    CHLA_AVAILABLE = True
+except ImportError:
+    CHLA_AVAILABLE = False
+
+# Historical SST provider (V7)
+try:
+    from data.fetchers.sst_historical_provider import SSTHistoricalProvider
+    SST_HISTORICAL_AVAILABLE = True
+except ImportError:
+    SST_HISTORICAL_AVAILABLE = False
+
+# GFW Dynamic Hotspots (V7)
+try:
+    from data.fetchers.gfw_hotspot_generator import GFWHotspotGenerator
+    GFW_HOTSPOTS_AVAILABLE = True
+except ImportError:
+    GFW_HOTSPOTS_AVAILABLE = False
+
 # Optional: Historical data for supervised learning
 try:
     from data.fetchers.historical_fetcher import HistoricalDataFetcher, FishMovementPredictor
@@ -51,6 +73,15 @@ try:
     TIMELINE_AVAILABLE = _db_path.exists()
 except:
     TIMELINE_AVAILABLE = False
+
+# Hourly predictions generator (V6)
+try:
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+    from generate_hourly_predictions import HourlyPredictionGenerator
+    HOURLY_PREDICTIONS_AVAILABLE = True
+except ImportError:
+    HOURLY_PREDICTIONS_AVAILABLE = False
 
 
 class AnalysisController:
@@ -111,6 +142,21 @@ class AnalysisController:
         self.physics_fetcher: Optional['CopernicusPhysicsFetcher'] = None
         self.sss_score: float = 0.5  # Neutral fallback
         self.sla_score: float = 0.5  # Neutral fallback
+
+        # Chlorophyll-a data (V7)
+        self.chla_fetcher: Optional['ChlorophyllFetcher'] = None
+        self.chla_score: float = 0.5  # Neutral fallback
+        self.chla_value: Optional[float] = None
+
+        # SST Historical data (V7)
+        self.sst_provider: Optional['SSTHistoricalProvider'] = None
+        self.sst_historical_score: float = 0.5  # Neutral fallback
+        self.sst_anomaly: float = 0.0
+
+        # GFW Dynamic Hotspots (V7)
+        self.gfw_generator: Optional['GFWHotspotGenerator'] = None
+        self.dynamic_hotspots: List = []
+        self.gfw_bonus: float = 0.0
 
         # Analysis date (V4) - can be overridden for historical analysis
         self.analysis_datetime: datetime = datetime.now()
@@ -480,14 +526,22 @@ class AnalysisController:
         print(self.predictor.get_model_summary())
         return self.pca_analysis
 
-    def analyze_spots(self) -> List[Dict]:
-        """Analyze and score fishing spots with tide, SSS, SLA integration (V4)."""
+    def analyze_spots(self, target_hour: int = None) -> List[Dict]:
+        """Analyze and score fishing spots with tide, SSS, SLA integration (V4/V6).
+
+        Args:
+            target_hour: Hour of day (0-23) for tide/time calculations.
+                        If None, uses current hour from analysis_datetime.
+        """
         if not self.fish_zones:
             self.generate_fish_zones()
 
-        # Get environmental scores (0-1) - fallback to 0.5 if not available
-        tide_score = self.tide_data.get('tide_score', 0.5) if self.tide_data else 0.5
-        tide_phase = self.tide_data.get('tide_phase', 'unknown') if self.tide_data else 'unknown'
+        # Determine target hour
+        if target_hour is None:
+            target_hour = self.analysis_datetime.hour
+
+        # Get environmental scores for specific hour
+        tide_score, tide_phase, hour_score = self._get_hourly_scores(target_hour)
 
         # SSS and SLA scores (V4)
         sss_score = self.sss_score  # Set by _fetch_physics_data
@@ -518,23 +572,43 @@ class AnalysisController:
             # Apply ML boost if available
             ml_boost = self._get_ml_boost(spot['lat'], spot['lon'])
 
-            # Environmental bonuses (V4):
-            # Tide: up to ±15 points
+            # Environmental bonuses (V4/V6/V7):
+            # Tide: up to ±15 points (marea entrante/saliente = bueno)
             tide_bonus = (tide_score - 0.5) * 30
+            # Hour: up to ±12 points (alba/ocaso = excelente)
+            hour_bonus = (hour_score - 0.5) * 24
             # SSS: up to ±10 points (salinity optimal range)
             sss_bonus = (sss_score - 0.5) * 20
             # SLA: up to ±8 points (negative SLA = upwelling = good)
             sla_bonus = (sla_score - 0.5) * 16
 
-            total_bonus = tide_bonus + sss_bonus + sla_bonus
+            # V7 bonuses:
+            # Chlorophyll-a: up to ±8 points (productividad primaria)
+            chla_bonus = (self.chla_score - 0.5) * 16
+            # SST Historical: up to ±6 points (anomalias termicas)
+            sst_hist_bonus = (self.sst_historical_score - 0.5) * 12
+            # GFW Hotspots: up to +10 points (proximidad a zona de pesca real)
+            gfw_bonus = self._get_gfw_bonus(spot['lat'], spot['lon'])
+
+            total_bonus = (tide_bonus + hour_bonus + sss_bonus + sla_bonus +
+                          chla_bonus + sst_hist_bonus + gfw_bonus)
 
             spot['score'] = min(100, max(0, best_score + ml_boost + total_bonus))
             spot['distance_to_fish'] = best_dist
             spot['direction_to_fish'] = best_dir
             spot['tide_phase'] = tide_phase
             spot['tide_score'] = tide_score
+            spot['hour_score'] = hour_score
+            spot['target_hour'] = target_hour
             spot['sss_score'] = sss_score
             spot['sla_score'] = sla_score
+
+            # V7 fields
+            spot['chla_score'] = self.chla_score
+            spot['chla_value'] = self.chla_value
+            spot['sst_historical_score'] = self.sst_historical_score
+            spot['sst_anomaly'] = self.sst_anomaly
+            spot['gfw_bonus'] = gfw_bonus
 
         self.sampled_spots.sort(key=lambda s: s['score'], reverse=True)
         return self.sampled_spots
@@ -557,6 +631,21 @@ class AnalysisController:
         # Add SSS and SLA data (V4)
         physics_data = self._fetch_physics_data(center_lat, center_lon)
         self.conditions['physics'] = physics_data
+
+        # Add Chlorophyll-a data (V7)
+        chla_data = self._fetch_chla_data(center_lat, center_lon)
+        self.conditions['chlorophyll'] = chla_data
+
+        # Add SST Historical data (V7)
+        sst_hist_data = self._fetch_sst_historical_data(center_lat, center_lon)
+        self.conditions['sst_historical'] = sst_hist_data
+
+        # Generate GFW Dynamic Hotspots (V7)
+        self._generate_dynamic_hotspots()
+        self.conditions['gfw_hotspots'] = {
+            'count': len(self.dynamic_hotspots),
+            'available': GFW_HOTSPOTS_AVAILABLE
+        }
 
         return self.conditions
 
@@ -605,6 +694,102 @@ class AnalysisController:
             self.tide_data = {'tide_score': 0.5, 'tide_phase': 'unknown'}
             return self.tide_data
 
+    def _get_hourly_scores(self, hour: int) -> Tuple[float, str, float]:
+        """Get tide and hour scores for a specific hour of the day (V6).
+
+        Args:
+            hour: Hour of day (0-23)
+
+        Returns:
+            Tuple of (tide_score, tide_phase, hour_score)
+        """
+        # Hour score based on fishing patterns (alba/ocaso = best)
+        HOUR_SCORES = {
+            0: 0.2, 1: 0.2, 2: 0.2, 3: 0.3,      # Madrugada
+            4: 0.5, 5: 0.7,                        # Pre-alba
+            6: 0.95, 7: 0.9,                       # Alba (excelente)
+            8: 0.75, 9: 0.65, 10: 0.55, 11: 0.45, # Mañana
+            12: 0.35, 13: 0.3, 14: 0.35,          # Mediodía (bajo)
+            15: 0.45, 16: 0.55, 17: 0.7,          # Tarde
+            18: 0.9, 19: 0.85,                     # Atardecer (excelente)
+            20: 0.6, 21: 0.5, 22: 0.4, 23: 0.3    # Noche
+        }
+        hour_score = HOUR_SCORES.get(hour, 0.5)
+
+        # Get tide score for specific hour
+        tide_score = 0.5  # Default neutral
+        tide_phase = 'unknown'
+
+        if TIDES_AVAILABLE and self.tide_fetcher:
+            try:
+                # Create datetime for the target hour
+                target_dt = self.analysis_datetime.replace(hour=hour, minute=0, second=0)
+
+                # Get center of coastline for reference
+                center_lat = np.mean([p[0] for p in self.coastline_points])
+                center_lon = np.mean([p[1] for p in self.coastline_points])
+
+                # Get tide state for target hour
+                tide_state = self.tide_fetcher.get_tidal_state(target_dt, center_lat, center_lon)
+
+                if hasattr(tide_state, '_asdict'):
+                    tide_dict = tide_state._asdict()
+                    tide_score = tide_dict.get('fishing_score', 0.5)
+                    tide_phase = tide_dict.get('phase', 'unknown')
+                elif isinstance(tide_state, dict):
+                    tide_score = tide_state.get('fishing_score', 0.5)
+                    tide_phase = tide_state.get('phase', 'unknown')
+
+            except Exception as e:
+                print(f"[WARN] Error calculando marea para hora {hour}: {e}")
+
+        return tide_score, tide_phase, hour_score
+
+    def analyze_spots_all_hours(self) -> Dict[int, List[Dict]]:
+        """Pre-calculate scores for all 24 hours (V6).
+
+        Returns:
+            Dict mapping hour (0-23) to list of spots with scores
+        """
+        all_hours_data = {}
+
+        print("[INFO] Pre-calculando scores para 24 horas...")
+        for hour in range(24):
+            # Reset spots to original state
+            for spot in self.sampled_spots:
+                spot.pop('score', None)
+
+            # Calculate scores for this hour
+            spots_for_hour = self.analyze_spots(target_hour=hour)
+
+            # Deep copy the results
+            all_hours_data[hour] = [
+                {
+                    'lat': s['lat'],
+                    'lon': s['lon'],
+                    'score': s['score'],
+                    'tide_phase': s.get('tide_phase', 'unknown'),
+                    'tide_score': s.get('tide_score', 0.5),
+                    'hour_score': s.get('hour_score', 0.5),
+                    'substrate': s.get('substrate', 'unknown'),
+                    'species': s.get('species', [])
+                }
+                for s in spots_for_hour
+            ]
+
+        # Find best hour for each spot
+        for spot_idx in range(len(self.sampled_spots)):
+            best_hour = max(range(24), key=lambda h: all_hours_data[h][spot_idx]['score'])
+            best_score = all_hours_data[best_hour][spot_idx]['score']
+
+            # Store in original spot data
+            if spot_idx < len(self.sampled_spots):
+                self.sampled_spots[spot_idx]['best_hour'] = best_hour
+                self.sampled_spots[spot_idx]['best_score'] = best_score
+
+        print(f"[OK] Scores calculados para 24 horas, {len(self.sampled_spots)} spots")
+        return all_hours_data
+
     def _fetch_physics_data(self, lat: float, lon: float) -> Dict:
         """Fetch SSS and SLA data for scoring (V4)."""
         if not PHYSICS_AVAILABLE:
@@ -644,6 +829,107 @@ class AnalysisController:
             self.sla_score = 0.5
             return {'sss_score': 0.5, 'sla_score': 0.5}
 
+    def _fetch_chla_data(self, lat: float, lon: float) -> Dict:
+        """Fetch Chlorophyll-a data for scoring (V7)."""
+        if not CHLA_AVAILABLE:
+            return {'chla_value': None, 'chla_score': 0.5}
+
+        try:
+            if not self.chla_fetcher:
+                self.chla_fetcher = ChlorophyllFetcher()
+
+            # Use analysis date
+            today = self.analysis_datetime.strftime('%Y-%m-%d')
+
+            # Get Chl-a value
+            self.chla_value = self.chla_fetcher.get_value_for_location(today, lat, lon)
+
+            if self.chla_value is not None:
+                self.chla_score = self.chla_fetcher.calculate_score(self.chla_value)
+            else:
+                self.chla_score = 0.5  # Neutral
+
+            return {
+                'chla_value': self.chla_value,
+                'chla_score': self.chla_score
+            }
+
+        except Exception as e:
+            print(f"[WARN] Error obteniendo Clorofila-a: {e}")
+            self.chla_score = 0.5
+            self.chla_value = None
+            return {'chla_value': None, 'chla_score': 0.5}
+
+    def _fetch_sst_historical_data(self, lat: float, lon: float) -> Dict:
+        """Fetch SST Historical data for scoring (V7)."""
+        if not SST_HISTORICAL_AVAILABLE:
+            return {'sst': None, 'anomaly': 0.0, 'score': 0.5}
+
+        try:
+            if not self.sst_provider:
+                self.sst_provider = SSTHistoricalProvider()
+
+            # Use analysis date
+            today = self.analysis_datetime.strftime('%Y-%m-%d')
+
+            # Get SST with anomaly
+            result = self.sst_provider.get_sst_with_anomaly(today, lat, lon)
+
+            self.sst_historical_score = result.score
+            self.sst_anomaly = result.anomaly
+
+            return {
+                'sst': result.sst,
+                'anomaly': result.anomaly,
+                'monthly_mean': result.monthly_mean,
+                'trend_7d': result.trend_7d,
+                'score': result.score
+            }
+
+        except Exception as e:
+            print(f"[WARN] Error obteniendo SST historico: {e}")
+            self.sst_historical_score = 0.5
+            self.sst_anomaly = 0.0
+            return {'sst': None, 'anomaly': 0.0, 'score': 0.5}
+
+    def _generate_dynamic_hotspots(self) -> None:
+        """Generate dynamic hotspots from GFW data (V7)."""
+        if not GFW_HOTSPOTS_AVAILABLE:
+            self.dynamic_hotspots = []
+            return
+
+        try:
+            if not self.gfw_generator:
+                self.gfw_generator = GFWHotspotGenerator()
+
+            # Generate hotspots
+            self.dynamic_hotspots = self.gfw_generator.generate_hotspots(
+                min_fishing_hours=5.0,
+                eps_km=2.0,
+                min_samples=5
+            )
+
+            print(f"[OK] Generados {len(self.dynamic_hotspots)} hotspots dinamicos GFW")
+
+        except Exception as e:
+            print(f"[WARN] Error generando hotspots GFW: {e}")
+            self.dynamic_hotspots = []
+
+    def _get_gfw_bonus(self, lat: float, lon: float) -> float:
+        """Calculate GFW hotspot proximity bonus (V7)."""
+        if not self.dynamic_hotspots or not self.gfw_generator:
+            return 0.0
+
+        try:
+            return self.gfw_generator.calculate_proximity_bonus(
+                lat, lon,
+                hotspots=self.dynamic_hotspots,
+                max_distance_km=10.0,
+                max_bonus=10.0
+            )
+        except:
+            return 0.0
+
     def create_map(self, output_path: str = "output/analysis_map.html") -> str:
         """Create visualization map."""
         if not self.coastline_points:
@@ -682,6 +968,52 @@ class AnalysisController:
             print(f"[OK] {len(multiday_data)} dias de predicciones generados")
         except Exception as e:
             print(f"[WARN] No se pudo agregar panel multi-dia: {e}")
+
+        # Add hourly predictions for 7 days (for dynamic date selector)
+        if HOURLY_PREDICTIONS_AVAILABLE:
+            try:
+                print("[INFO] Generando predicciones horarias para 7 dias...")
+                hourly_gen = HourlyPredictionGenerator()
+                analysis_date_str = self.analysis_datetime.strftime('%Y-%m-%d')
+
+                # Generate for center location
+                center_lat = np.mean([p[0] for p in self.coastline_points])
+                center_lon = np.mean([p[1] for p in self.coastline_points])
+
+                hourly_multiday = hourly_gen.generate_multiday(
+                    start_date=analysis_date_str,
+                    num_days=7,
+                    lat=center_lat,
+                    lon=center_lon
+                )
+
+                # Add to map for dynamic date switching
+                self.map_view.add_multiday_hourly_data(hourly_multiday)
+
+                # Also add hourly panel for first day
+                first_date = analysis_date_str
+                if first_date in hourly_multiday.get('days', {}):
+                    first_day_data = hourly_multiday['days'][first_date]
+                    hourly_panel_data = {
+                        'date': first_date,
+                        'location_name': hourly_multiday['location']['name'],
+                        'predictions': first_day_data['predictions'],
+                        'tide_extremes': first_day_data['tide_extremes'],
+                        'best_hours': first_day_data['best_hours']
+                    }
+                    self.map_view.add_hourly_panel(hourly_panel_data)
+
+                print(f"[OK] Predicciones horarias para 7 dias embebidas")
+            except Exception as e:
+                print(f"[WARN] No se pudo agregar predicciones horarias: {e}")
+
+        # Add unified hourly scoring data (V6) for spot-level hour selection
+        if hasattr(self, 'hourly_spots_data') and self.hourly_spots_data:
+            try:
+                self.map_view.add_hourly_spots_data(self.hourly_spots_data)
+                print(f"[OK] Datos de scoring unificado por hora embebidos")
+            except Exception as e:
+                print(f"[WARN] No se pudo agregar scoring unificado: {e}")
 
         # Add user location marker if proximity search is active
         if self.user_location:
@@ -732,8 +1064,9 @@ class AnalysisController:
 
         # 2. Sample spots with focus on key areas
         print("\n[2/8] Muestreando puntos de pesca...")
-        # Base sampling along entire coast
-        spots = self.sample_fishing_spots(spacing_m=750, max_spots=150)
+        # Base sampling along entire coast - high density for full coverage
+        # 281km coast / 300m spacing = ~937 spots, limited to 600
+        spots = self.sample_fishing_spots(spacing_m=300, max_spots=600)
         print(f"      {len(spots)} spots muestreados")
 
         # 3. Generate fish zones
@@ -761,9 +1094,13 @@ class AnalysisController:
         print("\n[7/8] Ejecutando prediccion ML con 32 features...")
         pca_results = self.run_ml_prediction()
 
-        # 8. Analyze spots
+        # 8. Analyze spots (current hour)
         print("\n[8/8] Analizando spots...")
         results = self.analyze_spots()
+
+        # 8b. Pre-calculate scores for all 24 hours (V6 - unified scoring)
+        print("\n[8b] Pre-calculando scores para 24 horas (scoring unificado)...")
+        self.hourly_spots_data = self.analyze_spots_all_hours()
 
         weather = conditions.get('weather', {})
         solunar = conditions.get('solunar', {})
@@ -774,12 +1111,15 @@ class AnalysisController:
         print("\nGenerando mapa...")
         map_path = self.create_map(output_path)
 
+        # Filter results to Peru only for recommendations
+        peru_results = [s for s in results if s['lat'] >= PERU_SOUTH_LIMIT]
+
         # Print results based on proximity search
         if self.user_location:
-            nearby_spots = self._filter_spots_by_proximity(results)
-            self._print_proximity_results(results[:5], nearby_spots[:5])
+            nearby_spots = self._filter_spots_by_proximity(peru_results)
+            self._print_proximity_results(peru_results[:5], nearby_spots[:5])
         else:
-            self._print_results(results[:5])
+            self._print_results(peru_results[:5])
 
         print(f"\n{'=' * 60}")
         print(f"MAPA GUARDADO: {map_path}")
@@ -1057,11 +1397,16 @@ class AnalysisController:
         return nearby
 
     def _print_results(self, top_spots: List[Dict]):
+        # Spots should already be filtered to Peru before calling this method
         print(f"\n{'=' * 60}")
-        print("TOP 5 MEJORES PUNTOS DE PESCA")
+        print("TOP 5 MEJORES PUNTOS DE PESCA (PERU)")
         print("=" * 60)
 
-        for i, spot in enumerate(top_spots):
+        if not top_spots:
+            print("\nNo hay spots disponibles.")
+            return
+
+        for i, spot in enumerate(top_spots[:5]):
             emoji = "*" if i == 0 else "#"
             print(f"\n{emoji}{i+1} - Score: {spot['score']:.1f}/100")
             print(f"   Coords: {spot['lat']:.6f}, {spot['lon']:.6f}")

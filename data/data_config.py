@@ -67,6 +67,10 @@ class DataConfig:
     RAW_SLA_DIR = RAW_DIR / "sla"
     RAW_SLA_COPERNICUS = RAW_SLA_DIR / "copernicus"
 
+    # Chlorophyll-a from Copernicus - Variable #3 (V7)
+    RAW_CHLA_DIR = RAW_DIR / "chla"
+    RAW_CHLA_COPERNICUS = RAW_CHLA_DIR / "copernicus"
+
     # User-submitted sightings (append-only)
     RAW_USER_SIGHTINGS = RAW_DIR / "user_sightings" / "sightings.jsonl"
 
@@ -211,6 +215,32 @@ class DataConfig:
             'auth': None,
             'format': 'internal',
             'partition': None
+        },
+        'copernicus_sss': {
+            'name': 'Copernicus Marine SSS',
+            'type': 'physics',
+            'api': 'copernicusmarine',
+            'auth': 'COPERNICUS_USER',
+            'format': 'parquet',
+            'partition': 'monthly'
+        },
+        'copernicus_sla': {
+            'name': 'Copernicus Marine SLA',
+            'type': 'physics',
+            'api': 'copernicusmarine',
+            'auth': 'COPERNICUS_USER',
+            'format': 'parquet',
+            'partition': 'monthly'
+        },
+        'copernicus_chla': {
+            'name': 'Copernicus Marine Chlorophyll-a',
+            'type': 'biology',
+            'api': 'copernicusmarine',
+            'auth': 'COPERNICUS_USER',
+            'dataset_id': 'cmems_obs-oc_glo_bgc-plankton_my_l4-gapfree-multi-4km_P1D',
+            'variable': 'CHL',
+            'format': 'parquet',
+            'partition': 'monthly'
         }
     }
 
@@ -271,6 +301,9 @@ class DataConfig:
             cls.RAW_SST_NOAA,
             cls.RAW_SST_EARTHDATA,
             cls.RAW_SST_COPERNICUS,
+            cls.RAW_SSS_COPERNICUS,
+            cls.RAW_SLA_COPERNICUS,
+            cls.RAW_CHLA_COPERNICUS,
             cls.RAW_DIR / "user_sightings",
             cls.PROCESSED_DIR,
             cls.CURRENT_DIR,
@@ -302,6 +335,7 @@ class DataConfig:
             'copernicus_sst': cls.RAW_SST_COPERNICUS,
             'copernicus_sss': cls.RAW_SSS_COPERNICUS,
             'copernicus_sla': cls.RAW_SLA_COPERNICUS,
+            'copernicus_chla': cls.RAW_CHLA_COPERNICUS,
         }
         base_dir = source_dirs.get(source)
         if not base_dir:
@@ -319,6 +353,7 @@ class DataConfig:
             'copernicus_sst': cls.RAW_SST_COPERNICUS,
             'copernicus_sss': cls.RAW_SSS_COPERNICUS,
             'copernicus_sla': cls.RAW_SLA_COPERNICUS,
+            'copernicus_chla': cls.RAW_CHLA_COPERNICUS,
         }
         base_dir = source_dirs.get(source)
         if not base_dir:
@@ -355,6 +390,7 @@ class DataConfig:
             'copernicus_sst': cls.RAW_SST_COPERNICUS,
             'copernicus_sss': cls.RAW_SSS_COPERNICUS,
             'copernicus_sla': cls.RAW_SLA_COPERNICUS,
+            'copernicus_chla': cls.RAW_CHLA_COPERNICUS,
         }
         base_dir = source_dirs.get(source)
         if not base_dir or not base_dir.exists():
@@ -369,6 +405,9 @@ RAW_OPEN_METEO = DataConfig.RAW_OPEN_METEO
 RAW_SST_NOAA = DataConfig.RAW_SST_NOAA
 RAW_SST_EARTHDATA = DataConfig.RAW_SST_EARTHDATA
 RAW_SST_COPERNICUS = DataConfig.RAW_SST_COPERNICUS
+RAW_SSS_COPERNICUS = DataConfig.RAW_SSS_COPERNICUS
+RAW_SLA_COPERNICUS = DataConfig.RAW_SLA_COPERNICUS
+RAW_CHLA_COPERNICUS = DataConfig.RAW_CHLA_COPERNICUS
 
 PROCESSED_DIR = DataConfig.PROCESSED_DIR
 FISHING_DB = DataConfig.FISHING_DB

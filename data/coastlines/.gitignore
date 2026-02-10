@@ -1,0 +1,4 @@
+# Ignore large data files - download them using scripts/download_osm_coastline.py
+*.zip
+coastlines-split-4326/
+water-polygons-split-4326/

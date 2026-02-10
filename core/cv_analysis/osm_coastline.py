@@ -139,56 +139,121 @@ class OSMCoastlineLoader:
         bounds = (lat_min, lat_max, lon_min, lon_max)
         bbox = box(lon_min, lat_min, lon_max, lat_max)
 
-        # Try to load from local cache first
+        # Try to load coastline lines directly from OSM data
+        coastline_lines = self._load_coastline_lines(bounds)
+
+        if coastline_lines:
+            # Extract points from coastline lines
+            coastline_points = self._extract_points_from_lines(
+                coastline_lines, resolution_m
+            )
+
+            # Generate water polygons from lines
+            water_polys = self._lines_to_water_polygon(coastline_lines, bounds)
+
+            # Create land polygons (inverse of water within bounds)
+            land_polys = self._create_land_polygons(water_polys, bbox)
+
+            logger.info(f"Loaded OSM coastline: {len(coastline_points)} points, {len(water_polys)} water polygons")
+
+            return CoastlineResult(
+                coastline_points=coastline_points,
+                water_polygons=water_polys,
+                land_polygons=land_polys,
+                bounds=bounds,
+                source='osm'
+            )
+
+        # Try water polygons as alternative
         water_polys = self._load_water_polygons(bounds)
 
-        if not water_polys:
-            # Try fallback: generate from Natural Earth or simple approximation
-            logger.warning("OSM data not available, using fallback coastline")
-            return self._generate_fallback_coastline(bounds, resolution_m)
+        if water_polys:
+            coastline_points = self._extract_coastline_points(
+                water_polys, bbox, resolution_m
+            )
+            land_polys = self._create_land_polygons(water_polys, bbox)
 
-        # Extract coastline points from water polygon boundaries
-        coastline_points = self._extract_coastline_points(
-            water_polys, bbox, resolution_m
+            return CoastlineResult(
+                coastline_points=coastline_points,
+                water_polygons=water_polys,
+                land_polygons=land_polys,
+                bounds=bounds,
+                source='osm'
+            )
+
+        # No OSM data available - raise error instead of fallback
+        logger.error("No OSM coastline data found. Run: python scripts/download_osm_coastline.py")
+        raise FileNotFoundError(
+            "OSM coastline data not found. Please download OSM data first:\n"
+            "  python scripts/download_osm_coastline.py\n"
+            "Or download manually from: https://osmdata.openstreetmap.de/data/coastlines.html"
         )
 
-        # Create land polygons (inverse of water within bounds)
-        land_polys = self._create_land_polygons(water_polys, bbox)
+    def _extract_points_from_lines(
+        self,
+        lines: List[LineString],
+        resolution_m: float
+    ) -> List[Tuple[float, float]]:
+        """Extract points from coastline lines at given resolution."""
+        points = []
+        resolution_deg = resolution_m / 111000  # Approximate
 
-        return CoastlineResult(
-            coastline_points=coastline_points,
-            water_polygons=water_polys,
-            land_polygons=land_polys,
-            bounds=bounds,
-            source='osm'
-        )
+        for line in lines:
+            # Simplify line to target resolution
+            simplified = line.simplify(resolution_deg / 2, preserve_topology=True)
 
-    def _load_water_polygons(
+            for lon, lat in simplified.coords:
+                points.append((lat, lon))
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_points = []
+        for p in points:
+            key = (round(p[0], 6), round(p[1], 6))
+            if key not in seen:
+                seen.add(key)
+                unique_points.append(p)
+
+        # Sort by latitude for consistent ordering
+        unique_points.sort(key=lambda x: x[0])
+
+        return unique_points
+
+    def _load_coastline_lines(
         self,
         bounds: Tuple[float, float, float, float]
-    ) -> List[Polygon]:
-        """Load water polygons from shapefile."""
+    ) -> List[LineString]:
+        """Load coastline lines from OSM shapefile."""
         if not HAS_SHAPEFILE:
             return []
 
         lat_min, lat_max, lon_min, lon_max = bounds
         cache_dir = Path(self.config.cache_dir)
 
-        # Look for existing shapefile
-        shp_files = list(cache_dir.glob("**/water_polygons*.shp"))
+        # Look for coastline lines shapefile
+        shp_files = list(cache_dir.glob("**/lines.shp"))
         if not shp_files:
-            shp_files = list(cache_dir.glob("**/water-polygons*.shp"))
+            shp_files = list(cache_dir.glob("**/coastlines*.shp"))
 
         if not shp_files:
             logger.info("No local OSM coastline data found")
             return []
 
-        polygons = []
+        lines = []
+        bbox_poly = box(lon_min, lat_min, lon_max, lat_max)
 
         for shp_path in shp_files:
             try:
+                logger.info(f"Loading coastlines from {shp_path}")
                 with shapefile.Reader(str(shp_path)) as sf:
+                    total_shapes = len(sf)
+                    checked = 0
+
                     for shp_rec in sf.iterShapes():
+                        checked += 1
+                        if checked % 100000 == 0:
+                            logger.debug(f"Checked {checked}/{total_shapes} shapes")
+
                         # Quick bounding box check
                         shp_bbox = shp_rec.bbox  # (minx, miny, maxx, maxy)
 
@@ -201,23 +266,139 @@ class OSMCoastlineLoader:
                         geom = shape(shp_rec.__geo_interface__)
 
                         # Clip to bounds
-                        bbox_poly = box(lon_min, lat_min, lon_max, lat_max)
                         clipped = geom.intersection(bbox_poly)
 
                         if not clipped.is_empty:
-                            if isinstance(clipped, Polygon):
-                                polygons.append(clipped)
-                            elif isinstance(clipped, MultiPolygon):
-                                polygons.extend(list(clipped.geoms))
+                            if isinstance(clipped, LineString):
+                                lines.append(clipped)
+                            elif hasattr(clipped, 'geoms'):
+                                for g in clipped.geoms:
+                                    if isinstance(g, LineString):
+                                        lines.append(g)
 
-                logger.info(f"Loaded {len(polygons)} water polygons from {shp_path.name}")
+                logger.info(f"Loaded {len(lines)} coastline segments from {shp_path.name}")
                 break  # Use first valid file
 
             except Exception as e:
                 logger.warning(f"Error reading {shp_path}: {e}")
+                import traceback
+                traceback.print_exc()
                 continue
 
-        return polygons
+        return lines
+
+    def _load_water_polygons(
+        self,
+        bounds: Tuple[float, float, float, float]
+    ) -> List[Polygon]:
+        """Load water polygons from shapefile or generate from coastlines."""
+        if not HAS_SHAPEFILE or not HAS_SHAPELY:
+            return []
+
+        lat_min, lat_max, lon_min, lon_max = bounds
+        cache_dir = Path(self.config.cache_dir)
+
+        # First try water polygons
+        shp_files = list(cache_dir.glob("**/water_polygons*.shp"))
+        if not shp_files:
+            shp_files = list(cache_dir.glob("**/water-polygons*.shp"))
+
+        if shp_files:
+            polygons = []
+            bbox_poly = box(lon_min, lat_min, lon_max, lat_max)
+
+            for shp_path in shp_files:
+                try:
+                    with shapefile.Reader(str(shp_path)) as sf:
+                        for shp_rec in sf.iterShapes():
+                            shp_bbox = shp_rec.bbox
+                            if (shp_bbox[2] < lon_min or shp_bbox[0] > lon_max or
+                                shp_bbox[3] < lat_min or shp_bbox[1] > lat_max):
+                                continue
+
+                            geom = shape(shp_rec.__geo_interface__)
+                            clipped = geom.intersection(bbox_poly)
+
+                            if not clipped.is_empty:
+                                if isinstance(clipped, Polygon):
+                                    polygons.append(clipped)
+                                elif isinstance(clipped, MultiPolygon):
+                                    polygons.extend(list(clipped.geoms))
+
+                    logger.info(f"Loaded {len(polygons)} water polygons")
+                    return polygons
+                except Exception as e:
+                    logger.warning(f"Error reading water polygons: {e}")
+
+        # If no water polygons, generate from coastline lines
+        coastline_lines = self._load_coastline_lines(bounds)
+
+        if coastline_lines:
+            return self._lines_to_water_polygon(coastline_lines, bounds)
+
+        return []
+
+    def _lines_to_water_polygon(
+        self,
+        lines: List[LineString],
+        bounds: Tuple[float, float, float, float]
+    ) -> List[Polygon]:
+        """Convert coastline lines to water polygon (for Peru, west is water)."""
+        lat_min, lat_max, lon_min, lon_max = bounds
+
+        if not lines:
+            return []
+
+        try:
+            # Merge all coastline segments
+            from shapely.ops import linemerge
+            merged = linemerge(lines)
+
+            # Get all coordinates from the coastline
+            if hasattr(merged, 'geoms'):
+                # Multiple lines
+                all_coords = []
+                for line in merged.geoms:
+                    all_coords.extend(list(line.coords))
+            else:
+                all_coords = list(merged.coords)
+
+            if len(all_coords) < 2:
+                return []
+
+            # Sort by latitude to create ordered coastline
+            all_coords_sorted = sorted(all_coords, key=lambda c: c[1])  # Sort by lat
+
+            # Create water polygon (west of coastline for Peru)
+            # Start from SW corner, go along coast, end at NW corner
+            water_coords = [(lon_min, lat_min)]  # SW corner
+
+            for lon, lat in all_coords_sorted:
+                water_coords.append((lon, lat))
+
+            water_coords.append((lon_min, lat_max))  # NW corner
+            water_coords.append((lon_min, lat_min))  # Close polygon
+
+            water_poly = Polygon(water_coords)
+
+            if water_poly.is_valid:
+                # Clip to bounds
+                bbox = box(lon_min, lat_min, lon_max, lat_max)
+                clipped = water_poly.intersection(bbox)
+                if isinstance(clipped, Polygon) and not clipped.is_empty:
+                    return [clipped]
+                elif isinstance(clipped, MultiPolygon):
+                    return [p for p in clipped.geoms if not p.is_empty]
+
+            # If invalid, try to fix
+            water_poly = water_poly.buffer(0)
+            if isinstance(water_poly, Polygon) and not water_poly.is_empty:
+                return [water_poly]
+
+        except Exception as e:
+            logger.warning(f"Error converting lines to polygon: {e}")
+
+        return []
 
     def _extract_coastline_points(
         self,

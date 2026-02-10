@@ -249,7 +249,7 @@ class RealDataPipeline:
         processing_info['coastline_source'] = coastline.source
         processing_info['coastline_points'] = len(coastline.coastline_points)
 
-        # 2. Get depth data
+        # 2. Get depth data from GEBCO (real bathymetry data)
         depth_grid, depth_lats, depth_lons = None, None, None
 
         if use_gebco and self.gebco._data is not None:
@@ -259,11 +259,9 @@ class RealDataPipeline:
             )
             processing_info['depth_source'] = 'gebco'
         else:
-            # Generate synthetic depth based on distance from coast
-            depth_grid, depth_lats, depth_lons = self._generate_synthetic_depth(
-                coastline, bounds
-            )
-            processing_info['depth_source'] = 'synthetic'
+            # No GEBCO data - zones will be based on distance from OSM coastline only
+            processing_info['depth_source'] = 'distance_based'
+            logger.info("GEBCO bathymetry not available - using distance-based zones from OSM coastline")
 
         # 3. Generate zones
         zones = self._generate_zones(
@@ -424,7 +422,8 @@ class RealDataPipeline:
 
                     # Get depth statistics for this zone
                     avg_depth, depth_range = self._get_zone_depth_stats(
-                        poly, depth_grid, depth_lats, depth_lons
+                        poly, depth_grid, depth_lats, depth_lons,
+                        distance_min_m=dist_min, distance_max_m=dist_max
                     )
 
                     # Determine substrate
@@ -518,42 +517,55 @@ class RealDataPipeline:
     def _get_zone_depth_stats(
         self,
         poly: Polygon,
-        depth_grid: np.ndarray,
-        depth_lats: np.ndarray,
-        depth_lons: np.ndarray
+        depth_grid: Optional[np.ndarray],
+        depth_lats: Optional[np.ndarray],
+        depth_lons: Optional[np.ndarray],
+        distance_min_m: float = 0,
+        distance_max_m: float = 100
     ) -> Tuple[float, Tuple[float, float]]:
-        """Get depth statistics for a zone polygon."""
-        if depth_grid is None or len(depth_grid) == 0:
-            return -10.0, (-5.0, -20.0)  # Default values
+        """
+        Get depth statistics for a zone polygon.
 
-        depths = []
+        If GEBCO data available: uses real bathymetry
+        If not: estimates from distance using Peru shelf model (~20m depth per km from coast)
+        """
+        # Try GEBCO first (real bathymetry data)
+        if depth_grid is not None and len(depth_grid) > 0 and depth_lats is not None:
+            depths = []
+            minx, miny, maxx, maxy = poly.bounds
 
-        # Sample points within polygon
-        minx, miny, maxx, maxy = poly.bounds
-
-        for lat in depth_lats:
-            if lat < miny or lat > maxy:
-                continue
-
-            lat_idx = np.argmin(np.abs(depth_lats - lat))
-
-            for lon in depth_lons:
-                if lon < minx or lon > maxx:
+            for lat in depth_lats:
+                if lat < miny or lat > maxy:
                     continue
 
-                if poly.contains(Point(lon, lat)):
-                    lon_idx = np.argmin(np.abs(depth_lons - lon))
+                lat_idx = np.argmin(np.abs(depth_lats - lat))
 
-                    if 0 <= lat_idx < depth_grid.shape[0] and 0 <= lon_idx < depth_grid.shape[1]:
-                        d = depth_grid[lat_idx, lon_idx]
-                        if not np.isnan(d):
-                            depths.append(d)
+                for lon in depth_lons:
+                    if lon < minx or lon > maxx:
+                        continue
 
-        if depths:
-            avg = float(np.mean(depths))
-            return avg, (float(np.min(depths)), float(np.max(depths)))
-        else:
-            return -10.0, (-5.0, -20.0)
+                    if poly.contains(Point(lon, lat)):
+                        lon_idx = np.argmin(np.abs(depth_lons - lon))
+
+                        if 0 <= lat_idx < depth_grid.shape[0] and 0 <= lon_idx < depth_grid.shape[1]:
+                            d = depth_grid[lat_idx, lon_idx]
+                            if not np.isnan(d):
+                                depths.append(d)
+
+            if depths:
+                avg = float(np.mean(depths))
+                return avg, (float(np.min(depths)), float(np.max(depths)))
+
+        # No GEBCO - estimate depth from distance to coast
+        # Peru coastal shelf: approximately 20m depth per 1km from shore
+        # This is based on typical Peruvian shelf bathymetry
+        avg_dist_km = (distance_min_m + distance_max_m) / 2000.0  # Convert to km
+        estimated_depth = -avg_dist_km * 20  # Negative = underwater, 20m per km
+
+        min_depth = -(distance_min_m / 1000.0) * 20
+        max_depth = -(distance_max_m / 1000.0) * 20
+
+        return estimated_depth, (max_depth, min_depth)  # Note: max_depth is more negative
 
     def _estimate_substrate(
         self,

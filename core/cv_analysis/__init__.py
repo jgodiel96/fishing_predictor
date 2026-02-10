@@ -1,21 +1,35 @@
 """
 Computer Vision Analysis Module for Fishing Predictor V8.
 
-Components:
-- CoastlineDetectorCV: Precise coastline detection using HSV analysis
-- SubstrateClassifier: Rock/Sand/Mixed classification from imagery
-- SatelliteBathymetry: Depth estimation from Blue/Green band ratio (Stumpf)
-- GEBCOBathymetry: Global bathymetry from GEBCO data
-- BathymetryFusion: Combines SDB and GEBCO intelligently
-- SpeciesZoneGenerator: Generate fishing zones by species habitat
-- CVAnalysisPipeline: Full pipeline integrating all components
+Two approaches available:
 
-Usage:
+1. REAL DATA PIPELINE (Recommended):
+   - OSMCoastlineLoader: Verified coastline from OpenStreetMap
+   - GEBCOBathymetry: Global bathymetry data (~450m resolution)
+   - RealDataPipeline: Generates zones from verified data sources
+
+2. CV-BASED PIPELINE (Experimental):
+   - CoastlineDetectorCV: HSV-based coastline detection (RGB only)
+   - SubstrateClassifier: Rock/Sand/Mixed classification
+   - SatelliteBathymetry: Stumpf algorithm for depth (requires calibration)
+   - CVAnalysisPipeline: Full CV pipeline
+
+The Real Data approach is more reliable because:
+- OSM coastlines are verified by humans
+- GEBCO provides actual measured depth data
+- No dependency on image quality or spectral bands
+
+Usage (Recommended):
+    from core.cv_analysis import RealDataPipeline
+
+    pipeline = RealDataPipeline()
+    result = pipeline.analyze_area(lat_min, lat_max, lon_min, lon_max)
+
+Usage (CV-based):
     from core.cv_analysis import CVAnalysisPipeline
 
     pipeline = CVAnalysisPipeline()
     result = pipeline.analyze_area(lat_min, lat_max, lon_min, lon_max)
-    result.save_geojson(Path('output.geojson'))
 """
 
 from .coastline_detector import (
@@ -50,7 +64,23 @@ from .species_zones import (
 from .pipeline import (
     CVAnalysisPipeline,
     CVAnalysisResult,
+)
+from .osm_coastline import (
+    OSMCoastlineLoader,
+    OSMCoastlineConfig,
+    CoastlineResult,
+    CoastalZoneGenerator,
+    load_coastline,
+    export_coastline_geojson,
+    haversine_distance,
+)
+from .real_data_pipeline import (
+    RealDataPipeline,
+    RealDataConfig,
+    RealDataResult,
+    RealDataZone,
     analyze_fishing_area,
+    export_result_to_file,
 )
 
 __all__ = [
@@ -79,8 +109,22 @@ __all__ = [
     'SPECIES_DATABASE',
     'generate_species_zones',
     'get_species_at_point',
-    # Pipeline
+    # CV Pipeline (experimental)
     'CVAnalysisPipeline',
     'CVAnalysisResult',
+    # OSM Coastline (real data)
+    'OSMCoastlineLoader',
+    'OSMCoastlineConfig',
+    'CoastlineResult',
+    'CoastalZoneGenerator',
+    'load_coastline',
+    'export_coastline_geojson',
+    'haversine_distance',
+    # Real Data Pipeline (recommended)
+    'RealDataPipeline',
+    'RealDataConfig',
+    'RealDataResult',
+    'RealDataZone',
     'analyze_fishing_area',
+    'export_result_to_file',
 ]

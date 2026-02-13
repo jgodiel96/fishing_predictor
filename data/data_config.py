@@ -141,6 +141,30 @@ class DataConfig:
     CHANGELOG_FILE = METADATA_DIR / "changelog.md"
 
     # ==========================================================================
+    # BATHYMETRY (GEBCO)
+    # ==========================================================================
+
+    BATHYMETRY_DIR = BASE_DIR / "bathymetry"
+    GEBCO_FILE = BATHYMETRY_DIR / "GEBCO_2025_peru.nc"  # Full Peru coast
+
+    # GEBCO region bounds (full Peru coast)
+    GEBCO_BOUNDS = {
+        'lat_min': -20.0,  # South (Chile border)
+        'lat_max': -3.0,   # North (Ecuador border)
+        'lon_min': -82.0,  # West (offshore)
+        'lon_max': -70.0,  # East (coast)
+        'name': 'Peru Full Coast'
+    }
+
+    # ==========================================================================
+    # COASTLINES (OSM)
+    # ==========================================================================
+
+    COASTLINES_DIR = BASE_DIR / "coastlines"
+    WATER_POLYGONS_DIR = COASTLINES_DIR / "water-polygons-split-4326"
+    WATER_POLYGONS_SHP = WATER_POLYGONS_DIR / "water_polygons.shp"
+
+    # ==========================================================================
     # CACHE (Temporary - can be deleted)
     # ==========================================================================
 
@@ -311,9 +335,26 @@ class DataConfig:
             cls.PREDICTIONS_DIR,
             cls.METADATA_DIR,
             cls.API_CACHE_DIR,
+            cls.BATHYMETRY_DIR,
+            cls.COASTLINES_DIR,
         ]
         for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    def get_gebco_path(cls) -> Path:
+        """Get the path to the GEBCO bathymetry file."""
+        return cls.GEBCO_FILE
+
+    @classmethod
+    def has_gebco_data(cls) -> bool:
+        """Check if GEBCO data is available."""
+        return cls.GEBCO_FILE.exists()
+
+    @classmethod
+    def has_water_polygons(cls) -> bool:
+        """Check if OSM water polygons are available."""
+        return cls.WATER_POLYGONS_SHP.exists()
 
     @classmethod
     def get_raw_path(cls, source: str, year: int, month: int) -> Path:
@@ -421,3 +462,10 @@ LEGACY_DB = DataConfig.LEGACY_DB
 TIMELINE_DB = DataConfig.TIMELINE_DB
 
 REGION = DataConfig.REGION
+
+# Bathymetry and coastlines
+BATHYMETRY_DIR = DataConfig.BATHYMETRY_DIR
+GEBCO_FILE = DataConfig.GEBCO_FILE
+GEBCO_BOUNDS = DataConfig.GEBCO_BOUNDS
+COASTLINES_DIR = DataConfig.COASTLINES_DIR
+WATER_POLYGONS_SHP = DataConfig.WATER_POLYGONS_SHP

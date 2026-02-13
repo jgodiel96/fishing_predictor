@@ -49,5 +49,14 @@ credentials.json
 data/raw/
 data/processed/
 data/analytics/
+
+# Geographic data (large files, downloaded separately)
+data/bathymetry/
+data/coastlines/
+data/GEBCO_*/
+
 # SAM model checkpoint (too large for git)
 models/sam/*.pth
+
+# Generated output
+output/

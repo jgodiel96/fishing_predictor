@@ -487,6 +487,124 @@ class HourlyPredictionGenerator:
 
         return sorted_preds[:top_n]
 
+    def generate_multiday(
+        self,
+        start_date: str,
+        num_days: int = 7,
+        lat: float = None,
+        lon: float = None,
+        location_name: str = None
+    ) -> Dict:
+        """
+        Genera predicciones para múltiples días consecutivos.
+
+        Args:
+            start_date: Fecha inicial en formato 'YYYY-MM-DD'
+            num_days: Número de días a generar (default: 7)
+            lat: Latitud (si None, usa Punta Coles)
+            lon: Longitud (si None, usa Punta Coles)
+            location_name: Nombre de la ubicación
+
+        Returns:
+            Dict con estructura:
+            {
+                'start_date': str,
+                'end_date': str,
+                'location': {'lat': float, 'lon': float, 'name': str},
+                'days': {
+                    'YYYY-MM-DD': {
+                        'day_name': str,
+                        'predictions': List[Dict],  # 24 horas
+                        'tide_extremes': List[Dict],
+                        'best_hours': List[Dict],  # Top 5
+                        'avg_score': float
+                    },
+                    ...
+                }
+            }
+        """
+        # Valores por defecto: Punta Coles
+        if lat is None:
+            lat = -17.702
+        if lon is None:
+            lon = -71.332
+
+        # Determinar nombre de ubicación
+        if location_name is None:
+            _, location_name = self._calculate_hotspot_score(lat, lon)
+
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+        end_dt = start_dt + timedelta(days=num_days - 1)
+
+        # Nombres de días en español
+        day_names_es = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+
+        result = {
+            'start_date': start_date,
+            'end_date': end_dt.strftime('%Y-%m-%d'),
+            'location': {
+                'lat': lat,
+                'lon': lon,
+                'name': location_name
+            },
+            'days': {}
+        }
+
+        for i in range(num_days):
+            current_dt = start_dt + timedelta(days=i)
+            date_str = current_dt.strftime('%Y-%m-%d')
+            day_name = day_names_es[current_dt.weekday()]
+
+            # Generar predicciones para las 24 horas
+            predictions = self.generate_for_location(date_str, lat, lon, location_name)
+
+            # Obtener extremos de marea
+            tide_extremes = self.tide_fetcher.get_tide_extremes_for_date(date_str, lat, lon)
+
+            # Obtener mejores 5 horas
+            best_hours = sorted(
+                predictions,
+                key=lambda x: x['total_score'],
+                reverse=True
+            )[:5]
+
+            # Calcular score promedio del día
+            avg_score = sum(p['total_score'] for p in predictions) / len(predictions)
+
+            result['days'][date_str] = {
+                'day_name': day_name,
+                'day_full': current_dt.strftime('%A'),
+                'predictions': predictions,
+                'tide_extremes': tide_extremes,
+                'best_hours': best_hours,
+                'avg_score': round(avg_score, 1)
+            }
+
+        return result
+
+    def get_multiday_summary(self, multiday_data: Dict) -> List[Dict]:
+        """
+        Genera un resumen de los múltiples días para mostrar en el selector.
+
+        Args:
+            multiday_data: Resultado de generate_multiday()
+
+        Returns:
+            Lista de dicts con resumen por día para el selector
+        """
+        summary = []
+        for date_str, day_data in multiday_data['days'].items():
+            best_hour = day_data['best_hours'][0] if day_data['best_hours'] else None
+            summary.append({
+                'date': date_str,
+                'day_name': day_data['day_name'],
+                'avg_score': day_data['avg_score'],
+                'best_hour': best_hour['time'] if best_hour else 'N/A',
+                'best_score': best_hour['total_score'] if best_hour else 0,
+                'tide_count': len(day_data['tide_extremes'])
+            })
+        return summary
+
     def save_to_database(self, predictions: List[Dict]):
         """
         Guarda predicciones en la base de datos.
@@ -571,6 +689,13 @@ def main():
         help='Generar para todos los hotspots'
     )
     parser.add_argument(
+        '--multiday',
+        type=int,
+        default=0,
+        metavar='N',
+        help='Generar predicciones para N días (default: 0 = solo un día)'
+    )
+    parser.add_argument(
         '--save',
         action='store_true',
         help='Guardar en base de datos'
@@ -585,7 +710,35 @@ def main():
 
     generator = HourlyPredictionGenerator()
 
-    if args.all_hotspots:
+    # Modo multi-día
+    if args.multiday > 0:
+        print(f"Generando predicciones para {args.multiday} días desde {args.date}...")
+        multiday_data = generator.generate_multiday(
+            start_date=args.date,
+            num_days=args.multiday,
+            lat=args.lat,
+            lon=args.lon
+        )
+
+        if args.json:
+            print(json.dumps(multiday_data, indent=2, default=str))
+        else:
+            # Imprimir resumen
+            summary = generator.get_multiday_summary(multiday_data)
+            print(f"\n{'='*60}")
+            print(f"PREDICCIÓN {args.multiday} DÍAS - {multiday_data['location']['name']}")
+            print(f"{'='*60}")
+            print(f"{'Fecha':<12} {'Día':<5} {'Prom':<6} {'Mejor Hora':<12} {'Score':<6}")
+            print("-" * 45)
+            for day in summary:
+                print(f"{day['date']:<12} {day['day_name']:<5} {day['avg_score']:>5.0f} {day['best_hour']:<12} {day['best_score']:>5.0f}")
+
+        if args.save:
+            for date_str, day_data in multiday_data['days'].items():
+                generator.save_to_database(day_data['predictions'])
+            print(f"\nGuardado en {generator.db_path}")
+
+    elif args.all_hotspots:
         print(f"Generando predicciones para todos los hotspots...")
         results = generator.generate_for_hotspots(args.date)
 

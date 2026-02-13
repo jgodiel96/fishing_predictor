@@ -44,13 +44,26 @@ class BoundingBox(NamedTuple):
         return self.south <= lat <= self.north and self.west <= lon <= self.east
 
 
-# Primary study area: Tacna-Ilo coast, Peru
-# From Ilo (north) to Boca del Rio (south)
+# Primary study area: Tacna-Ilo coast + Northern Chile extension
+# Extended area for oceanographic analysis (currents, fish movement, thermal fronts)
+# Recommendations are filtered to Peru only (see PERU_LIMIT)
 STUDY_AREA = BoundingBox(
-    north=-17.50,
-    south=-18.25,
-    west=-71.45,
-    east=-70.65
+    north=-17.20,   # North: beyond Ilo
+    south=-18.55,   # South: includes Chile for analysis context
+    west=-71.60,    # West: coastal waters
+    east=-70.25     # East: inland reference
+)
+
+# Peru-Chile border latitude (Concordia)
+# Used to filter recommendations to Peru only
+PERU_SOUTH_LIMIT = -18.35
+
+# Peru-only area (for reference)
+PERU_AREA = BoundingBox(
+    north=-17.20,
+    south=-18.35,   # Border with Chile
+    west=-71.60,
+    east=-70.30
 )
 
 

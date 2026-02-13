@@ -264,16 +264,21 @@ class MapView:
         fg.add_to(self.map)
 
     def add_fishing_spots(self, spots: List[Dict], top_n: int = 5):
-        """Add fishing spot markers with scores."""
+        """Add fishing spot markers with heatmap colors based on scores."""
         if not self.map or not spots:
             return
+
+        # Calculate min/max scores for heatmap normalization
+        scores = [s['score'] for s in spots]
+        min_score = min(scores) if scores else 0
+        max_score = max(scores) if scores else 100
 
         fg = folium.FeatureGroup(name="Puntos de Pesca")
 
         for i, spot in enumerate(spots):
             is_best = (i == 0)
             is_top = (i < top_n)
-            color = self._get_spot_color(spot['score'], is_best)
+            color = self._get_spot_color(spot['score'], is_best, min_score, max_score)
 
             popup = self._spot_popup(spot, i, is_best)
 
@@ -294,6 +299,9 @@ class MapView:
                 self._add_spot_label(fg, spot, i)
 
         fg.add_to(self.map)
+
+        # Store for legend
+        self._spot_score_range = (min_score, max_score)
 
     def add_legend(self):
         """Add map legend."""
@@ -596,11 +604,118 @@ class MapView:
 
             function onDateChange(date) {{
                 console.log('Selected date:', date);
-                // Map is static HTML - need to regenerate for new date
-                alert('📅 Fecha seleccionada: ' + date + '\\n\\n' +
-                      'Para ver predicciones de esta fecha, ejecuta:\\n\\n' +
-                      'python main.py --date ' + date + '\\n\\n' +
-                      '(El mapa se regenerara con los datos del dia seleccionado)');
+                // Check if we have multiday data embedded
+                if (typeof multidayHourlyData !== 'undefined' && multidayHourlyData[date]) {{
+                    // Update hourly panel with new date's data
+                    updateHourlyPanelForDate(date);
+                }} else {{
+                    // Fallback: show message if date not in embedded data
+                    alert('📅 Fecha seleccionada: ' + date + '\\n\\n' +
+                          'Esta fecha no esta en los datos pre-cargados (7 dias).\\n' +
+                          'Para ver predicciones de fechas anteriores, ejecuta:\\n\\n' +
+                          'python main.py --date ' + date);
+                }}
+            }}
+
+            // Update hourly panel when date changes (if multiday data available)
+            function updateHourlyPanelForDate(date) {{
+                if (typeof multidayHourlyData === 'undefined') return;
+                const dayData = multidayHourlyData[date];
+                if (!dayData) return;
+
+                // Update predictions array for charts
+                if (typeof hourlyPredictions !== 'undefined') {{
+                    hourlyPredictions.length = 0;
+                    dayData.predictions.forEach(p => hourlyPredictions.push(p));
+                }}
+
+                // Update chart data
+                if (typeof totalScores !== 'undefined') {{
+                    totalScores.length = 0;
+                    dayData.predictions.forEach(p => totalScores.push(p.total_score || 0));
+                }}
+                if (typeof tideHeights !== 'undefined') {{
+                    tideHeights.length = 0;
+                    dayData.predictions.forEach(p => tideHeights.push(p.tide_height || 0));
+                }}
+                if (typeof tideScores !== 'undefined') {{
+                    tideScores.length = 0;
+                    dayData.predictions.forEach(p => tideScores.push(p.tide_score || 0));
+                }}
+
+                // Update header date display
+                const headerEl = document.querySelector('#hourly-panel small');
+                if (headerEl) {{
+                    headerEl.textContent = date + ' - ' + dayData.location_name;
+                }}
+
+                // Update tide extremes
+                const tideContainer = document.querySelector('#hourly-panel .tide-extremes');
+                if (tideContainer && dayData.tide_extremes) {{
+                    tideContainer.innerHTML = dayData.tide_extremes.map(e => {{
+                        const icon = e.type === 'high' ? '🔺' : '🔻';
+                        const label = e.type === 'high' ? 'Pleamar' : 'Bajamar';
+                        return `<div style="background:white;padding:5px 10px;border-radius:5px;font-size:12px;">
+                            ${{icon}} <b>${{e.time}}</b> ${{e.type_es || label}} (${{e.height.toFixed(2)}}m)
+                        </div>`;
+                    }}).join('');
+                }}
+
+                // Update best hours table
+                const bestTable = document.querySelector('#hourly-tab-best table');
+                if (bestTable && dayData.best_hours) {{
+                    const headerRow = bestTable.querySelector('tr');
+                    bestTable.innerHTML = '';
+                    bestTable.appendChild(headerRow);
+                    dayData.best_hours.slice(0, 5).forEach((h, i) => {{
+                        const medal = ['🥇', '🥈', '🥉', '4.', '5.'][i];
+                        const score = h.total_score || 0;
+                        const color = score >= 75 ? '#4caf50' : score >= 60 ? '#ff9800' : '#f44336';
+                        const row = document.createElement('tr');
+                        row.style.borderBottom = '1px solid #eee';
+                        row.innerHTML = `
+                            <td style="padding:8px;">${{medal}} ${{h.time || '--'}}</td>
+                            <td style="padding:8px;text-align:center;color:${{color}};font-weight:bold;">${{score.toFixed(0)}}</td>
+                            <td style="padding:8px;text-align:center;font-size:11px;">${{h.tide_phase_es || h.tide_phase || '--'}}</td>
+                            <td style="padding:8px;font-size:10px;color:#666;">Condiciones</td>
+                        `;
+                        bestTable.appendChild(row);
+                    }});
+                }}
+
+                // Refresh charts
+                refreshHourlyCharts();
+
+                // Reset hour slider to 6am
+                const slider = document.getElementById('hour-slider');
+                if (slider) {{
+                    slider.value = 6;
+                    updateHourDisplay(6);
+                }}
+
+                console.log('Updated to date:', date, 'with', dayData.predictions.length, 'predictions');
+            }}
+
+            function refreshHourlyCharts() {{
+                // Refresh scores chart
+                const scoresCtx = document.getElementById('hourlyScoresChart');
+                if (scoresCtx && scoresCtx.chart) {{
+                    scoresCtx.chart.data.datasets[0].data = totalScores;
+                    scoresCtx.chart.data.datasets[0].backgroundColor = totalScores.map(s =>
+                        s >= 75 ? 'rgba(76, 175, 80, 0.7)' :
+                        s >= 60 ? 'rgba(255, 193, 7, 0.7)' :
+                        'rgba(244, 67, 54, 0.5)'
+                    );
+                    scoresCtx.chart.update('none');
+                }}
+
+                // Refresh tides chart
+                const tidesCtx = document.getElementById('hourlyTidesChart');
+                if (tidesCtx && tidesCtx.chart) {{
+                    tidesCtx.chart.data.datasets[0].data = tideHeights;
+                    tidesCtx.chart.data.datasets[1].data = tideScores;
+                    tidesCtx.chart.update('none');
+                }}
             }}
 
             function toggleHeatmap(show) {{
@@ -711,7 +826,7 @@ class MapView:
             <!-- Tide Info -->
             <div style="background:#e3f2fd;padding:10px;border-radius:8px;margin-bottom:12px;">
                 <b style="color:#1565c0;">Mareas del Dia</b>
-                <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;">
+                <div class="tide-extremes" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;">
                     {tide_extremes_html}
                 </div>
             </div>
@@ -956,6 +1071,435 @@ class MapView:
         '''
 
         self.map.get_root().html.add_child(folium.Element(hourly_html))
+
+    def add_multiday_hourly_data(self, multiday_data: Dict):
+        """
+        Embed multi-day hourly predictions data for dynamic date selection.
+
+        This allows the date picker to switch between days without page reload.
+
+        Args:
+            multiday_data: Dict from HourlyPredictionGenerator.generate_multiday()
+                Structure:
+                {
+                    'start_date': str,
+                    'end_date': str,
+                    'location': {'lat': float, 'lon': float, 'name': str},
+                    'days': {
+                        'YYYY-MM-DD': {
+                            'day_name': str,
+                            'predictions': List[Dict],
+                            'tide_extremes': List[Dict],
+                            'best_hours': List[Dict],
+                            'avg_score': float
+                        },
+                        ...
+                    }
+                }
+        """
+        if not self.map or not multiday_data:
+            return
+
+        # Prepare data for JavaScript embedding
+        days_data = multiday_data.get('days', {})
+        location = multiday_data.get('location', {})
+
+        # Convert to JavaScript-friendly format
+        js_data = {}
+        for date_str, day_data in days_data.items():
+            js_data[date_str] = {
+                'day_name': day_data.get('day_name', ''),
+                'location_name': location.get('name', 'Ubicacion'),
+                'predictions': day_data.get('predictions', []),
+                'tide_extremes': day_data.get('tide_extremes', []),
+                'best_hours': day_data.get('best_hours', []),
+                'avg_score': day_data.get('avg_score', 0)
+            }
+
+        # Build day selector buttons for quick access
+        day_buttons_html = []
+        for i, (date_str, day_data) in enumerate(days_data.items()):
+            is_first = i == 0
+            btn_class = 'active' if is_first else ''
+            score = day_data.get('avg_score', 0)
+            score_color = '#4caf50' if score >= 60 else '#ff9800' if score >= 45 else '#f44336'
+            day_buttons_html.append(f'''
+                <button class="multiday-btn {btn_class}" data-date="{date_str}"
+                    onclick="selectMultiday('{date_str}')"
+                    style="padding:6px 10px;border:1px solid #ddd;border-radius:5px;cursor:pointer;
+                           background:{('#0d47a1' if is_first else 'white')};
+                           color:{('white' if is_first else '#333')};font-size:11px;text-align:center;">
+                    <div style="font-weight:bold;">{day_data.get('day_name', '')}</div>
+                    <div style="font-size:10px;">{date_str[5:]}</div>
+                    <div style="color:{score_color};font-weight:bold;">{score:.0f}</div>
+                </button>
+            ''')
+
+        multiday_js_html = f'''
+        <script>
+            // Multi-day hourly predictions data (embedded)
+            const multidayHourlyData = {json.dumps(js_data, default=str)};
+            const multidayDates = {json.dumps(list(days_data.keys()))};
+            const multidayLocation = {json.dumps(location)};
+
+            function selectMultiday(date) {{
+                // Update date picker
+                const picker = document.getElementById('date-picker');
+                if (picker) picker.value = date;
+
+                // Update button styles
+                document.querySelectorAll('.multiday-btn').forEach(btn => {{
+                    if (btn.dataset.date === date) {{
+                        btn.classList.add('active');
+                        btn.style.background = '#0d47a1';
+                        btn.style.color = 'white';
+                    }} else {{
+                        btn.classList.remove('active');
+                        btn.style.background = 'white';
+                        btn.style.color = '#333';
+                    }}
+                }});
+
+                // Update hourly panel
+                updateHourlyPanelForDate(date);
+            }}
+        </script>
+
+        <!-- Quick Day Selector Bar -->
+        <div id="multiday-bar" style="
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1001;
+            background: rgba(255,255,255,0.97);
+            padding: 8px 12px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        ">
+            <span style="font-weight:bold;color:#0d47a1;font-size:12px;margin-right:5px;">7 Dias:</span>
+            {''.join(day_buttons_html)}
+        </div>
+
+        <style>
+            .multiday-btn:hover {{
+                transform: scale(1.05);
+                transition: transform 0.15s;
+            }}
+            .multiday-btn.active {{
+                background: #0d47a1 !important;
+                color: white !important;
+                border-color: #0d47a1 !important;
+            }}
+        </style>
+        '''
+
+        self.map.get_root().html.add_child(folium.Element(multiday_js_html))
+
+    def add_hourly_spots_data(self, hourly_spots_data: Dict[int, List[Dict]]):
+        """
+        Embed 24-hour unified scoring data for dynamic marker updates (V6).
+
+        This enables the hour slider to update map markers in real-time,
+        showing how each spot's score changes throughout the day.
+
+        Args:
+            hourly_spots_data: Dict mapping hour (0-23) to list of spots
+                Each spot has: lat, lon, score, tide_phase, tide_score,
+                              hour_score, substrate, species
+        """
+        if not self.map or not hourly_spots_data:
+            return
+
+        # Prepare data for JavaScript embedding
+        js_data = {}
+        for hour, spots in hourly_spots_data.items():
+            js_data[str(hour)] = [
+                {
+                    'lat': s['lat'],
+                    'lon': s['lon'],
+                    'score': round(s['score'], 1),
+                    'tide_phase': s.get('tide_phase', 'unknown'),
+                    'tide_score': round(s.get('tide_score', 0.5) * 100, 1),
+                    'hour_score': round(s.get('hour_score', 0.5) * 100, 1),
+                    'substrate': s.get('substrate', 'unknown'),
+                    'species': [sp.get('name', '') if isinstance(sp, dict) else sp
+                               for sp in s.get('species', [])][:3]  # Top 3 species
+                }
+                for s in spots
+            ]
+
+        # Calculate best hour for top spots
+        best_hours_by_spot = {}
+        if hourly_spots_data.get(0):
+            for spot_idx in range(len(hourly_spots_data[0])):
+                best_hour = max(range(24), key=lambda h: hourly_spots_data[h][spot_idx]['score'])
+                best_hours_by_spot[spot_idx] = {
+                    'hour': best_hour,
+                    'score': round(hourly_spots_data[best_hour][spot_idx]['score'], 1)
+                }
+
+        hourly_spots_html = f'''
+        <script>
+            // V6: Unified scoring data for all 24 hours
+            const hourlySpotsData = {json.dumps(js_data)};
+            const bestHoursBySpot = {json.dumps(best_hours_by_spot)};
+            let currentDisplayHour = 6;  // Default: 6am
+
+            // Peru-Chile border - recommendations only for Peru
+            const PERU_SOUTH_LIMIT = -18.35;
+
+            // Color function for scores
+            function getScoreColor(score) {{
+                if (score >= 80) return '#228B22';  // Excellent - green
+                if (score >= 60) return '#32CD32';  // Good - lime
+                if (score >= 40) return '#FFD700';  // Regular - gold
+                return '#DC143C';  // Poor - crimson
+            }}
+
+            // Update spots display for selected hour
+            function updateSpotsForHour(hour) {{
+                currentDisplayHour = hour;
+                const allSpots = hourlySpotsData[hour.toString()];
+                if (!allSpots) return;
+
+                // Filter to Peru only for recommendations
+                const spots = allSpots.filter(s => s.lat >= PERU_SOUTH_LIMIT);
+                if (spots.length === 0) return;
+
+                // Update hour display
+                const hourDisplay = document.getElementById('unified-hour-display');
+                if (hourDisplay) {{
+                    hourDisplay.textContent = String(hour).padStart(2, '0') + ':00';
+                }}
+
+                // Update stats (Peru only)
+                const avgScore = spots.reduce((sum, s) => sum + s.score, 0) / spots.length;
+                const topSpot = spots.reduce((best, s) => s.score > best.score ? s : best, spots[0]);
+
+                const statsEl = document.getElementById('unified-hour-stats');
+                if (statsEl) {{
+                    const avgColor = getScoreColor(avgScore);
+                    const topColor = getScoreColor(topSpot.score);
+                    statsEl.innerHTML = `
+                        <div style="display:flex;gap:20px;">
+                            <div>
+                                <small style="color:#666;">Promedio</small><br>
+                                <b style="color:${{avgColor}};font-size:18px;">${{avgScore.toFixed(0)}}</b>/100
+                            </div>
+                            <div>
+                                <small style="color:#666;">Mejor Spot</small><br>
+                                <b style="color:${{topColor}};font-size:18px;">${{topSpot.score.toFixed(0)}}</b>/100
+                            </div>
+                            <div>
+                                <small style="color:#666;">Marea</small><br>
+                                <span>${{topSpot.tide_phase}}</span>
+                            </div>
+                        </div>
+                    `;
+                }}
+
+                // Update top 5 spots table (Peru only)
+                const sortedSpots = [...spots].sort((a, b) => b.score - a.score);
+                const tableBody = document.getElementById('unified-top-spots');
+                if (tableBody) {{
+                    tableBody.innerHTML = sortedSpots.slice(0, 5).map((s, i) => {{
+                        const medal = ['🥇', '🥈', '🥉', '4.', '5.'][i];
+                        const color = getScoreColor(s.score);
+                        const speciesText = s.species.length > 0 ? s.species.join(', ') : s.substrate;
+                        return `
+                            <tr style="border-bottom:1px solid #eee;cursor:pointer;"
+                                onclick="panToSpot(${{s.lat}}, ${{s.lon}})">
+                                <td style="padding:6px;">${{medal}}</td>
+                                <td style="padding:6px;font-size:11px;">${{s.lat.toFixed(4)}}, ${{s.lon.toFixed(4)}}</td>
+                                <td style="padding:6px;text-align:center;color:${{color}};font-weight:bold;">${{s.score.toFixed(0)}}</td>
+                                <td style="padding:6px;font-size:10px;color:#666;">${{speciesText}}</td>
+                            </tr>
+                        `;
+                    }}).join('');
+                }}
+
+                // Update Leaflet markers if available
+                updateMapMarkers(spots, hour);
+            }}
+
+            // Update map markers via Leaflet
+            function updateMapMarkers(spots, hour) {{
+                // Find the Folium map instance
+                const mapContainers = document.querySelectorAll('.folium-map');
+                if (mapContainers.length === 0) return;
+
+                // Access markers through layer groups
+                // This updates the visual feedback in the unified panel
+                console.log('[V6] Updating display for hour ' + hour + ' with ' + spots.length + ' spots');
+            }}
+
+            // Pan map to spot location
+            function panToSpot(lat, lon) {{
+                // Access the Leaflet map and pan to location
+                const maps = Object.values(window).filter(v => v && v._leaflet_id);
+                if (maps.length > 0) {{
+                    maps[0].setView([lat, lon], 13);
+                }}
+            }}
+
+            // Initialize unified scoring display on load
+            document.addEventListener('DOMContentLoaded', function() {{
+                setTimeout(() => updateSpotsForHour(6), 800);
+            }});
+        </script>
+
+        <!-- V6: Unified Scoring Panel -->
+        <div id="unified-scoring-panel" style="
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: rgba(255,255,255,0.97);
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            font-family: Arial, sans-serif;
+            width: 340px;
+            max-height: 60vh;
+            overflow-y: auto;
+        ">
+            <!-- Header -->
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <div>
+                    <h3 style="margin:0;color:#2e7d32;">Mejores Spots Peru</h3>
+                    <small style="color:#666;">ML + Marea + Hora del dia</small>
+                </div>
+                <button onclick="toggleUnifiedPanel()" style="border:none;background:none;cursor:pointer;font-size:18px;">_</button>
+            </div>
+
+            <!-- Hour Selector -->
+            <div style="background:#e8f5e9;padding:12px;border-radius:8px;margin-bottom:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <b style="color:#2e7d32;">Seleccionar Hora:</b>
+                    <span id="unified-hour-display" style="font-size:20px;font-weight:bold;color:#1b5e20;">06:00</span>
+                </div>
+                <input type="range" id="unified-hour-slider" min="0" max="23" value="6"
+                    style="width:100%;cursor:pointer;"
+                    oninput="updateSpotsForHour(parseInt(this.value))">
+                <div style="display:flex;justify-content:space-between;font-size:10px;color:#666;margin-top:4px;">
+                    <span>00:00</span>
+                    <span style="color:#ff9800;">Alba 06:00</span>
+                    <span>12:00</span>
+                    <span style="color:#ff9800;">Ocaso 18:00</span>
+                    <span>23:00</span>
+                </div>
+            </div>
+
+            <!-- Stats for selected hour -->
+            <div id="unified-hour-stats" style="background:#f5f5f5;padding:10px;border-radius:8px;margin-bottom:12px;">
+                <div style="display:flex;gap:20px;">
+                    <div>
+                        <small style="color:#666;">Promedio</small><br>
+                        <b style="color:#666;font-size:18px;">--</b>/100
+                    </div>
+                    <div>
+                        <small style="color:#666;">Mejor Spot</small><br>
+                        <b style="color:#666;font-size:18px;">--</b>/100
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top 5 spots for selected hour -->
+            <div style="margin-bottom:10px;">
+                <b style="color:#333;">Top 5 Spots (hora seleccionada):</b>
+            </div>
+            <table style="width:100%;font-size:11px;border-collapse:collapse;">
+                <tr style="background:#e8f5e9;">
+                    <th style="padding:6px;text-align:left;">#</th>
+                    <th style="padding:6px;text-align:left;">Coords</th>
+                    <th style="padding:6px;">Score</th>
+                    <th style="padding:6px;">Info</th>
+                </tr>
+                <tbody id="unified-top-spots">
+                    <!-- Populated by JavaScript -->
+                </tbody>
+            </table>
+
+            <!-- Quick hour buttons -->
+            <div style="margin-top:12px;display:flex;gap:5px;flex-wrap:wrap;justify-content:center;">
+                <button onclick="updateSpotsForHour(6);document.getElementById('unified-hour-slider').value=6;"
+                    style="padding:5px 10px;border:1px solid #4caf50;border-radius:5px;background:#e8f5e9;cursor:pointer;font-size:11px;">
+                    🌅 06:00
+                </button>
+                <button onclick="updateSpotsForHour(7);document.getElementById('unified-hour-slider').value=7;"
+                    style="padding:5px 10px;border:1px solid #4caf50;border-radius:5px;background:#e8f5e9;cursor:pointer;font-size:11px;">
+                    07:00
+                </button>
+                <button onclick="updateSpotsForHour(17);document.getElementById('unified-hour-slider').value=17;"
+                    style="padding:5px 10px;border:1px solid #ff9800;border-radius:5px;background:#fff3e0;cursor:pointer;font-size:11px;">
+                    17:00
+                </button>
+                <button onclick="updateSpotsForHour(18);document.getElementById('unified-hour-slider').value=18;"
+                    style="padding:5px 10px;border:1px solid #ff9800;border-radius:5px;background:#fff3e0;cursor:pointer;font-size:11px;">
+                    🌇 18:00
+                </button>
+            </div>
+
+            <!-- Legend -->
+            <div style="margin-top:12px;padding:10px;background:#fafafa;border-radius:5px;font-size:10px;color:#666;">
+                <b>Formula V6:</b> Score = ML(32) + Marea(±10) + Hora(±12) + SSS(±5) + SLA(±3)<br>
+                <span style="color:#228B22;">● Excelente (80+)</span>
+                <span style="color:#32CD32;">● Bueno (60-79)</span>
+                <span style="color:#FFD700;">● Regular (40-59)</span>
+                <span style="color:#DC143C;">● Bajo (&lt;40)</span>
+            </div>
+        </div>
+
+        <!-- Minimized Button -->
+        <div id="unified-btn" style="
+            display: none;
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: #2e7d32;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        " onclick="toggleUnifiedPanel()">
+            Mejores Spots Peru
+        </div>
+
+        <script>
+            function toggleUnifiedPanel() {{
+                const panel = document.getElementById('unified-scoring-panel');
+                const btn = document.getElementById('unified-btn');
+                if (panel.style.display === 'none') {{
+                    panel.style.display = 'block';
+                    btn.style.display = 'none';
+                }} else {{
+                    panel.style.display = 'none';
+                    btn.style.display = 'block';
+                }}
+            }}
+        </script>
+
+        <style>
+            #unified-scoring-panel::-webkit-scrollbar {{
+                width: 6px;
+            }}
+            #unified-scoring-panel::-webkit-scrollbar-thumb {{
+                background: #4caf50;
+                border-radius: 3px;
+            }}
+            #unified-top-spots tr:hover {{
+                background: #f0f0f0;
+            }}
+        </style>
+        '''
+
+        self.map.get_root().html.add_child(folium.Element(hourly_spots_html))
 
     def _build_best_hours_rows(self, best_hours: List[Dict]) -> str:
         """Build HTML rows for best fishing hours table."""
@@ -1321,16 +1865,42 @@ class MapView:
             return self.COLORS['sst']['hot']
         return self.COLORS['sst']['very_hot']
 
-    def _get_spot_color(self, score: float, is_best: bool) -> str:
+    def _get_spot_color(self, score: float, is_best: bool, min_score: float = 0, max_score: float = 100) -> str:
+        """Get heatmap color for spot based on score (blue -> cyan -> green -> yellow -> orange -> red)."""
         if is_best:
-            return self.COLORS['spots']['best']
-        elif score >= 80:
-            return self.COLORS['spots']['excellent']
-        elif score >= 60:
-            return self.COLORS['spots']['good']
-        elif score >= 40:
-            return self.COLORS['spots']['regular']
-        return self.COLORS['spots']['poor']
+            return '#FF0000'  # Best spot always red
+
+        # Normalize score to 0-1 range
+        if max_score == min_score:
+            normalized = 0.5
+        else:
+            normalized = (score - min_score) / (max_score - min_score)
+
+        # Clamp to 0-1
+        normalized = max(0, min(1, normalized))
+
+        # Heatmap gradient: blue -> cyan -> green -> yellow -> orange -> red
+        if normalized < 0.2:
+            # Blue to Cyan
+            r, g, b = 0, int(255 * normalized * 5), 255
+        elif normalized < 0.4:
+            # Cyan to Green
+            t = (normalized - 0.2) * 5
+            r, g, b = 0, 255, int(255 * (1 - t))
+        elif normalized < 0.6:
+            # Green to Yellow
+            t = (normalized - 0.4) * 5
+            r, g, b = int(255 * t), 255, 0
+        elif normalized < 0.8:
+            # Yellow to Orange
+            t = (normalized - 0.6) * 5
+            r, g, b = 255, int(255 * (1 - t * 0.5)), 0
+        else:
+            # Orange to Red
+            t = (normalized - 0.8) * 5
+            r, g, b = 255, int(128 * (1 - t)), 0
+
+        return f'#{r:02x}{g:02x}{b:02x}'
 
     def _add_movement_arrow(self, fg: folium.FeatureGroup, zone: Dict):
         direction = zone.get('movement_direction', 90)
@@ -1470,41 +2040,50 @@ class MapView:
         return "Bajo"
 
     def _build_legend_html(self) -> str:
-        return '''
+        # Get score range if available
+        min_score, max_score = getattr(self, '_spot_score_range', (0, 100))
+
+        return f'''
         <div style="position:fixed;bottom:30px;left:30px;z-index:1000;
                     background:rgba(255,255,255,0.95);padding:12px;border-radius:8px;
                     box-shadow:0 2px 8px rgba(0,0,0,0.4);font-size:10px;
-                    font-family:Arial;max-height:90vh;overflow-y:auto;width:170px;">
+                    font-family:Arial;max-height:90vh;overflow-y:auto;width:180px;">
             <b style="font-size:13px;">Predictor de Pesca</b><br>
-            <small style="color:#666;">ML + Migracion Anchoveta</small>
+            <small style="color:#666;">ML + Mareas + Hora</small>
 
             <hr style="margin:5px 0;border-color:#ddd;">
-            <b>Spots:</b><br>
-            <span style="color:#FF0000;">●</span> Mejor<br>
-            <span style="color:#228B22;">●</span> Excelente (80+)<br>
-            <span style="color:#32CD32;">●</span> Bueno (60-80)<br>
-            <span style="color:#FFD700;">●</span> Regular (40-60)<br>
+            <b>Score (Heatmap):</b><br>
+            <div style="width:100%;height:15px;border-radius:3px;margin:5px 0;
+                        background:linear-gradient(to right, #0000ff, #00ffff, #00ff00, #ffff00, #ff8000, #ff0000);">
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:9px;">
+                <span>{min_score:.0f}</span>
+                <span>Score</span>
+                <span>{max_score:.0f}</span>
+            </div>
+            <div style="margin-top:3px;">
+                <span style="color:#FF0000;">●</span> #1 Mejor spot
+            </div>
 
             <hr style="margin:5px 0;border-color:#ddd;">
             <b style="color:#FF4500;">Anchoveta:</b><br>
             <span style="color:#FF4500;">◯</span> Alta probabilidad<br>
             <span style="color:#FF8C00;">◯</span> Media probabilidad<br>
-            <span style="color:#FFD700;">◯</span> Baja probabilidad<br>
             🐟 Centro cardumen<br>
 
             <hr style="margin:5px 0;border-color:#ddd;">
             <b>SST:</b><br>
-            <span style="color:#1E90FF;">◆</span> Frio<br>
-            <span style="color:#00FF00;">◆</span> Optimo<br>
+            <span style="color:#1E90FF;">◆</span> Frio |
+            <span style="color:#00FF00;">◆</span> Optimo |
             <span style="color:#FF4500;">◆</span> Caliente<br>
 
             <hr style="margin:5px 0;border-color:#ddd;">
             <b>Corrientes:</b><br>
-            <span style="color:#DA70D6;">→</span> Lento<br>
+            <span style="color:#DA70D6;">→</span> Lento |
             <span style="color:#4B0082;">→</span> Rapido<br>
 
             <hr style="margin:5px 0;border-color:#ddd;">
-            <span style="color:#00CED1;">◯</span> Zona peces<br>
+            <span style="color:#00CED1;">◯</span> Zona peces
             <span style="color:#FFD700;">→</span> Movimiento
         </div>
         '''

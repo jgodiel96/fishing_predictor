@@ -71,6 +71,14 @@ class DataConfig:
     RAW_CHLA_DIR = RAW_DIR / "chla"
     RAW_CHLA_COPERNICUS = RAW_CHLA_DIR / "copernicus"
 
+    # Ocean Currents from Copernicus - uo/vo
+    RAW_CURRENTS_DIR = RAW_DIR / "currents"
+    RAW_CURRENTS_COPERNICUS = RAW_CURRENTS_DIR / "copernicus"
+
+    # Waves from Copernicus - VHM0, VTPK, VMDR
+    RAW_WAVES_DIR = RAW_DIR / "waves"
+    RAW_WAVES_COPERNICUS = RAW_WAVES_DIR / "copernicus"
+
     # User-submitted sightings (append-only)
     RAW_USER_SIGHTINGS = RAW_DIR / "user_sightings" / "sightings.jsonl"
 
@@ -377,6 +385,8 @@ class DataConfig:
             'copernicus_sss': cls.RAW_SSS_COPERNICUS,
             'copernicus_sla': cls.RAW_SLA_COPERNICUS,
             'copernicus_chla': cls.RAW_CHLA_COPERNICUS,
+            'copernicus_currents': cls.RAW_CURRENTS_COPERNICUS,
+            'copernicus_waves': cls.RAW_WAVES_COPERNICUS,
         }
         base_dir = source_dirs.get(source)
         if not base_dir:
@@ -395,6 +405,8 @@ class DataConfig:
             'copernicus_sss': cls.RAW_SSS_COPERNICUS,
             'copernicus_sla': cls.RAW_SLA_COPERNICUS,
             'copernicus_chla': cls.RAW_CHLA_COPERNICUS,
+            'copernicus_currents': cls.RAW_CURRENTS_COPERNICUS,
+            'copernicus_waves': cls.RAW_WAVES_COPERNICUS,
         }
         base_dir = source_dirs.get(source)
         if not base_dir:
@@ -432,6 +444,8 @@ class DataConfig:
             'copernicus_sss': cls.RAW_SSS_COPERNICUS,
             'copernicus_sla': cls.RAW_SLA_COPERNICUS,
             'copernicus_chla': cls.RAW_CHLA_COPERNICUS,
+            'copernicus_currents': cls.RAW_CURRENTS_COPERNICUS,
+            'copernicus_waves': cls.RAW_WAVES_COPERNICUS,
         }
         base_dir = source_dirs.get(source)
         if not base_dir or not base_dir.exists():

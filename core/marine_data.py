@@ -67,17 +67,21 @@ class ThermalFront:
 
 class MarineDataFetcher:
     """
-    Obtiene datos marinos de Open-Meteo Marine API.
+    Obtiene datos marinos de múltiples fuentes.
+
+    Prioridad de datos:
+    1. Copernicus Marine Service (datos históricos de alta calidad)
+    2. Open-Meteo Marine API (datos en tiempo real)
 
     Capacidades:
-    - SST en tiempo real y histórico (últimos 7 días)
-    - Corrientes oceánicas (velocidad y dirección)
-    - Altura y período de olas
+    - SST en tiempo real y histórico
+    - Corrientes oceánicas (velocidad y dirección) desde Copernicus
+    - Altura y período de olas desde Copernicus
     """
 
     BASE_URL = ENDPOINTS.openmeteo_marine
 
-    def __init__(self, cache_dir: str = None):
+    def __init__(self, cache_dir: str = None, use_copernicus: bool = True):
         if cache_dir is None:
             cache_dir = Path(__file__).parent.parent / "data" / "cache"
         self.cache_dir = Path(cache_dir)
@@ -90,13 +94,82 @@ class MarineDataFetcher:
         # Puntos marinos muestreados (para visualización)
         self.sampled_points: List[MarinePoint] = []
 
+        # Proveedor de datos de Copernicus
+        self.use_copernicus = use_copernicus
+        self._copernicus_provider = None
+        if use_copernicus:
+            try:
+                from core.copernicus_data_provider import CopernicusDataProvider
+                self._copernicus_provider = CopernicusDataProvider()
+            except ImportError:
+                self._copernicus_provider = None
+
+    def fetch_from_copernicus(self, date: str) -> List[MarinePoint]:
+        """
+        Obtiene datos marinos desde Copernicus Marine Service.
+
+        Args:
+            date: Fecha en formato YYYY-MM-DD
+
+        Returns:
+            Lista de MarinePoint con datos reales de Copernicus
+        """
+        if self._copernicus_provider is None:
+            print("[WARN] Copernicus provider no disponible")
+            return []
+
+        print(f"[INFO] Cargando datos de Copernicus para {date}...")
+        ocean_points = self._copernicus_provider.get_data_for_date(date)
+
+        if not ocean_points:
+            print("[WARN] No hay datos de Copernicus para esta fecha")
+            return []
+
+        # Convertir a MarinePoint
+        points = []
+        for op in ocean_points:
+            if op.sst is None:
+                continue
+
+            point = MarinePoint(
+                lat=op.lat,
+                lon=op.lon,
+                sst=op.sst,
+                wave_height=op.wave_height if op.wave_height else 1.0,
+                wave_period=op.wave_period if op.wave_period else 8.0,
+                current_speed=op.current_speed if op.current_speed else 0.1,
+                current_direction=op.current_direction if op.current_direction else 180.0,
+                timestamp=date
+            )
+            points.append(point)
+            self.sampled_points.append(point)
+
+            # Crear vector de corriente para visualización
+            if op.uo is not None and op.vo is not None:
+                self.current_vectors.append(CurrentVector(
+                    lat=op.lat,
+                    lon=op.lon,
+                    u=op.uo,
+                    v=op.vo,
+                    speed=op.current_speed or np.sqrt(op.uo**2 + op.vo**2),
+                    direction=op.current_direction or np.degrees(np.arctan2(op.vo, op.uo))
+                ))
+
+        print(f"[OK] {len(points)} puntos cargados desde Copernicus")
+        print(f"     - SST: {sum(1 for p in points if p.sst)} puntos")
+        print(f"     - Corrientes: {len(self.current_vectors)} vectores")
+        print(f"     - Olas: {sum(1 for op in ocean_points if op.wave_height)} puntos")
+
+        return points
+
     def fetch_grid(
         self,
         lat_min: float,
         lat_max: float,
         lon_min: float,
         lon_max: float,
-        resolution: float = 0.1  # grados (~11km)
+        resolution: float = 0.1,  # grados (~11km)
+        date: str = None  # Fecha para datos de Copernicus
     ) -> List[MarinePoint]:
         """
         Obtiene datos marinos en una grilla.
@@ -105,10 +178,24 @@ class MarineDataFetcher:
             lat_min, lat_max: rango de latitud
             lon_min, lon_max: rango de longitud
             resolution: resolución en grados
+            date: Fecha para usar datos de Copernicus (YYYY-MM-DD)
 
         Returns:
             Lista de MarinePoint con datos
         """
+        # Si hay fecha y Copernicus disponible, usar datos reales
+        if date and self._copernicus_provider:
+            copernicus_points = self.fetch_from_copernicus(date)
+            if copernicus_points:
+                # Filtrar por región
+                filtered = [
+                    p for p in copernicus_points
+                    if lat_min <= p.lat <= lat_max and lon_min <= p.lon <= lon_max
+                ]
+                if filtered:
+                    return filtered
+
+        # Fallback a Open-Meteo API
         points = []
 
         # Generar grilla

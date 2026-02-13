@@ -291,8 +291,8 @@ class TestIntegration:
         """Test historical hotspot analysis."""
         extractor = FeatureExtractor()
 
-        # Near Punta Coles hotspot
-        dist, sim = extractor._analyze_hotspots(-17.70, -71.35, 17.5)
+        # Near Punta Coles hotspot (coordinates from domain.py: -17.702, -71.385)
+        dist, sim = extractor._analyze_hotspots(-17.702, -71.385, 17.5)
         assert dist < 1000  # Should be very close
         assert sim > 0.5  # Should have similarity
 

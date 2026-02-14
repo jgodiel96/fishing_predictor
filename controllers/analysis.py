@@ -67,6 +67,13 @@ try:
 except ImportError:
     HISTORICAL_AVAILABLE = False
 
+# Copernicus Data Provider (currents, waves, SST from downloaded data)
+try:
+    from core.copernicus_data_provider import CopernicusDataProvider, convert_to_marine_points
+    COPERNICUS_DATA_AVAILABLE = True
+except ImportError:
+    COPERNICUS_DATA_AVAILABLE = False
+
 # Timeline data availability
 try:
     _db_path = LEGACY_DB if DataConfig is None else DataConfig.LEGACY_DB
@@ -164,6 +171,11 @@ class AnalysisController:
         # Historical data for supervised learning
         self.historical_fetcher: Optional['HistoricalDataFetcher'] = None
         self.is_supervised_mode: bool = False
+
+        # Copernicus data provider (real oceanographic data)
+        self.copernicus_provider: Optional['CopernicusDataProvider'] = None
+        if COPERNICUS_DATA_AVAILABLE:
+            self.copernicus_provider = CopernicusDataProvider()
 
         # Results
         self.ml_predictions: List = []
@@ -370,10 +382,22 @@ class AnalysisController:
     def fetch_marine_data(self) -> int:
         """Fetch marine data and generate flow lines following coast contour.
 
+        Priority:
+        1. Copernicus data (if available for analysis date)
+        2. Open-Meteo API (fallback for real-time)
+
         Samples from each coastline segment separately to ensure correct
         perpendicular bearings (no cross-segment calculations).
         """
-        print("[INFO] Generando muestreo paralelo a la costa...")
+        # Try Copernicus data first (better quality)
+        if COPERNICUS_DATA_AVAILABLE and self.copernicus_provider:
+            analysis_date = self.analysis_datetime.strftime('%Y-%m-%d')
+            copernicus_points = self._fetch_copernicus_marine_data(analysis_date)
+            if copernicus_points:
+                return len(self.current_vectors)
+
+        # Fallback to Open-Meteo sampling
+        print("[INFO] Generando muestreo paralelo a la costa (Open-Meteo)...")
 
         # Use segments if available
         segments = getattr(self, 'coastline_segments', None)
@@ -426,6 +450,97 @@ class AnalysisController:
 
         print(f"[OK] {len(self.current_vectors)} vectores, {len(self.flow_lines)} lineas de flujo")
         return len(self.current_vectors)
+
+    def _fetch_copernicus_marine_data(self, date: str) -> bool:
+        """
+        Fetch marine data from Copernicus (SST, currents, waves).
+
+        Args:
+            date: Date in YYYY-MM-DD format
+
+        Returns:
+            True if data was loaded successfully
+        """
+        from core.marine_data import MarinePoint, CurrentVector
+
+        print(f"[INFO] Cargando datos de Copernicus para {date}...")
+
+        ocean_points = self.copernicus_provider.get_data_for_date(date)
+
+        if not ocean_points:
+            print("[WARN] No hay datos de Copernicus, usando Open-Meteo...")
+            return False
+
+        # Get statistics
+        stats = self.copernicus_provider.get_statistics(date)
+        print(f"      SST: {stats['sst']['count']} pts ({stats['sst']['min']:.1f}°C - {stats['sst']['max']:.1f}°C)")
+        print(f"      Corrientes: {stats['currents']['count']} pts (media: {stats['currents']['mean_speed']:.3f} m/s)")
+        print(f"      Olas: {stats['waves']['count']} pts (altura media: {stats['waves']['mean_height']:.2f} m)")
+
+        # Convert to MarinePoint format
+        self.marine_points = []
+        self.current_vectors = []
+
+        for op in ocean_points:
+            if op.sst is None:
+                continue
+
+            # Create MarinePoint
+            mp = MarinePoint(
+                lat=op.lat,
+                lon=op.lon,
+                sst=op.sst,
+                wave_height=op.wave_height if op.wave_height else 1.0,
+                wave_period=op.wave_period if op.wave_period else 8.0,
+                current_speed=op.current_speed if op.current_speed else 0.1,
+                current_direction=op.current_direction if op.current_direction else 180.0,
+                timestamp=date
+            )
+            self.marine_points.append(mp)
+
+            # Create CurrentVector for visualization
+            if op.uo is not None and op.vo is not None:
+                speed = op.current_speed or np.sqrt(op.uo**2 + op.vo**2)
+                direction = op.current_direction or np.degrees(np.arctan2(op.vo, op.uo))
+                self.current_vectors.append(CurrentVector(
+                    lat=op.lat,
+                    lon=op.lon,
+                    u=op.uo,
+                    v=op.vo,
+                    speed=speed,
+                    direction=direction
+                ))
+
+        # Generate flow lines from current vectors
+        self.flow_lines = self._generate_flow_lines_from_vectors()
+
+        # Initialize marine_fetcher for compatibility
+        self.marine_fetcher = MarineDataFetcher(use_copernicus=False)
+        self.marine_fetcher.current_vectors = self.current_vectors
+        self.marine_fetcher.sampled_points = self.marine_points
+
+        print(f"[OK] Copernicus: {len(self.marine_points)} puntos, {len(self.current_vectors)} vectores")
+        return True
+
+    def _generate_flow_lines_from_vectors(self, num_steps: int = 5, step_km: float = 4.0) -> List:
+        """Generate flow lines from current vectors for visualization."""
+        flow_lines = []
+        step_deg = step_km / 111.0
+
+        for vector in self.current_vectors:
+            line = [(vector.lat, vector.lon)]
+            lat, lon = vector.lat, vector.lon
+            direction = vector.direction
+
+            for _ in range(num_steps):
+                rad = np.radians(direction)
+                lat += step_deg * np.cos(rad)
+                lon += step_deg * np.sin(rad) / np.cos(np.radians(lat))
+                line.append((lat, lon))
+
+            flow_lines.append(line)
+
+        return flow_lines
 
     def generate_fish_zones(self, num_zones: int = 6) -> List[Dict]:
         """Generate fish zones using real data."""

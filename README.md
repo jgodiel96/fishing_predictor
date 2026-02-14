@@ -2,7 +2,181 @@
 
 Sistema avanzado de prediccion de puntos optimos de pesca desde orilla para la costa sur de Peru (Tacna - Ilo).
 
-**Fecha de actualizacion:** 2026-02-03
+**Fecha de actualizacion:** 2026-02-13
+
+## Diagrama de Arquitectura del Sistema
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           FUENTES DE DATOS EXTERNAS                              │
+├─────────────────────┬─────────────────────┬─────────────────────┬───────────────┤
+│   COPERNICUS        │    OPEN-METEO       │  GLOBAL FISHING     │   IMARPE      │
+│   Marine Service    │    ERA5 API         │  WATCH (GFW)        │   Historico   │
+├─────────────────────┼─────────────────────┼─────────────────────┼───────────────┤
+│ • SST (OSTIA)       │ • Olas (altura,     │ • Actividad AIS     │ • Hotspots    │
+│ • Corrientes (uo,vo)│   periodo, dir)     │ • Horas de pesca    │ • Zonas       │
+│ • Olas (VHM0,VTPK)  │ • Viento (u,v)      │ • Tipo de pesca     │   verificadas │
+│ • Clorofila-a       │ • SST alternativa   │                     │               │
+└──────────┬──────────┴──────────┬──────────┴──────────┬──────────┴───────────────┘
+           │                     │                     │
+           ▼                     ▼                     ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          CAPA BRONZE (data/raw/) - INMUTABLE                     │
+├─────────────────────┬─────────────────────┬─────────────────────────────────────┤
+│ sst/copernicus/     │ open_meteo/         │ gfw/                                │
+│ currents/           │ YYYY-MM.parquet     │ YYYY-MM.parquet                     │
+│ waves/              │ _manifest.json      │ _manifest.json                      │
+│ chlorophyll/        │                     │                                     │
+│ YYYY-MM.parquet     │                     │                                     │
+└──────────┬──────────┴──────────┬──────────┴──────────┬──────────────────────────┘
+           │                     │                     │
+           └─────────────────────┼─────────────────────┘
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                       CAPA SILVER (data/processed/) - REGENERABLE                │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  fishing_consolidated.db    marine_consolidated.db    training_features.parquet │
+│        (1,085 reg)              (572,793 reg)              (213,378 reg)        │
+└──────────────────────────────────────┬──────────────────────────────────────────┘
+                                       │
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                                 CORE LAYER                                       │
+├───────────────────────────────┬─────────────────────────────────────────────────┤
+│   copernicus_data_provider.py │   marine_data.py                                │
+│   ┌─────────────────────┐     │   ┌─────────────────────────────────────────┐   │
+│   │ CopernicusDataProvider│   │   │ MarineDataFetcher                       │   │
+│   │ • load_sst()        │     │   │ • fetch_from_copernicus() [PRINCIPAL]   │   │
+│   │ • load_currents()   │     │   │ • fetch_from_api()        [FALLBACK]    │   │
+│   │ • load_waves()      │     │   └─────────────────────────────────────────┘   │
+│   │ • load_chlorophyll()│     │   ┌─────────────────────────────────────────┐   │
+│   │ • get_data_for_date()│    │   │ ThermalFrontDetector                    │   │
+│   └─────────────────────┘     │   │ • detect_fronts()                       │   │
+│                               │   │ • calculate_gradients()                 │   │
+├───────────────────────────────┴───┴─────────────────────────────────────────────┤
+│   coastline_real.py           │   weather_solunar.py                            │
+│   • CoastlineProcessor        │   • SolunarCalculator                           │
+│   • 7,741 pts OSM             │   • Fases lunares, alba/ocaso                   │
+└──────────────────────────────────────┬──────────────────────────────────────────┘
+                                       │
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                                MODELS LAYER                                      │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│   features.py                                                                    │
+│   ┌───────────────────────────────────────────────────────────────────────────┐ │
+│   │ FeatureExtractor - 32 Features Oceanograficos                             │ │
+│   │ ┌──────────────────┬──────────────────┬──────────────────┬──────────────┐ │ │
+│   │ │ SST (6)          │ Frentes (5)      │ Corrientes (6)   │ Olas (3)     │ │ │
+│   │ │ • temperatura    │ • gradiente      │ • velocidad      │ • altura     │ │ │
+│   │ │ • anomalia       │ • direccion      │ • componentes    │ • periodo    │ │ │
+│   │ │ • score optimo   │ • is_front       │ • convergencia   │ • favorable  │ │ │
+│   │ │ • score especie  │ • intensidad     │ • cizalladura    │              │ │ │
+│   │ ├──────────────────┼──────────────────┼──────────────────┼──────────────┤ │ │
+│   │ │ Upwelling (3)    │ Espacial (4)     │ Historico (2)    │ Temporal (3) │ │ │
+│   │ │ • indice         │ • dist_costa     │ • dist_hotspot   │ • hora       │ │ │
+│   │ │ • ekman          │ • profundidad    │ • similitud      │ • luna       │ │ │
+│   │ │ • favorable      │ • zona costera   │                  │ • estacion   │ │ │
+│   │ └──────────────────┴──────────────────┴──────────────────┴──────────────┘ │ │
+│   └───────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                  │
+│   predictor.py                                                                   │
+│   ┌───────────────────────────────────────────────────────────────────────────┐ │
+│   │ FishingPredictor - Pipeline ML                                            │ │
+│   │                                                                           │ │
+│   │   32 Features ──► StandardScaler ──► PCA (8 comp) ──► KMeans (6 clusters) │ │
+│   │                                            │                              │ │
+│   │                                            ▼                              │ │
+│   │                                   GradientBoosting ──► Score (0-100)      │ │
+│   │                                                                           │ │
+│   │   Modo Supervisado: Entrena con datos GFW historicos                      │ │
+│   │   Modo No-Supervisado: Clustering + Domain Knowledge                      │ │
+│   └───────────────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────┬──────────────────────────────────────────┘
+                                       │
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              CONTROLLER LAYER                                    │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│   controllers/analysis.py                                                        │
+│   ┌───────────────────────────────────────────────────────────────────────────┐ │
+│   │ AnalysisController                                                        │ │
+│   │ • run_full_analysis()                                                     │ │
+│   │   1. Cargar linea costera (OSM)                                           │ │
+│   │   2. Fetch datos marinos (Copernicus/Open-Meteo)                          │ │
+│   │   3. Detectar frentes termicos                                            │ │
+│   │   4. Extraer 32 features                                                  │ │
+│   │   5. Entrenar/Predecir con ML                                             │ │
+│   │   6. Filtrar por proximidad (opcional)                                    │ │
+│   │   7. Generar mapa interactivo                                             │ │
+│   └───────────────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────┬──────────────────────────────────────────┘
+                                       │
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                                 VIEW LAYER                                       │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│   views/map_view.py                                                              │
+│   ┌───────────────────────────────────────────────────────────────────────────┐ │
+│   │ MapGenerator (Folium)                                                     │ │
+│   │ • Capa base: OpenStreetMap / CartoDB                                      │ │
+│   │ • Capa SST: Heatmap de temperatura                                        │ │
+│   │ • Capa Corrientes: Vectores de flujo                                      │ │
+│   │ • Capa Pesca: Marcadores con score/cluster                                │ │
+│   │ • Capa Proximidad: Circulo de busqueda + ubicacion usuario                │ │
+│   └───────────────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────┬──────────────────────────────────────────┘
+                                       │
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                                   OUTPUT                                         │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│   output/fishing_analysis_ml.html                                                │
+│   • Mapa interactivo con todas las capas                                         │
+│   • Top 10 zonas de pesca recomendadas                                           │
+│   • Estadisticas de scores y clusters                                            │
+│   • Feature importance del modelo                                                │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Flujo de Datos
+
+```
+┌────────────────┐    ┌────────────────┐    ┌────────────────┐
+│   COPERNICUS   │    │   OPEN-METEO   │    │     GFW        │
+│   (Principal)  │    │   (Fallback)   │    │  (Training)    │
+└───────┬────────┘    └───────┬────────┘    └───────┬────────┘
+        │                     │                     │
+        ▼                     ▼                     ▼
+┌───────────────────────────────────────────────────────────────┐
+│                    Datos Parquet (Bronze)                      │
+│            data/raw/{sst,currents,waves,chlorophyll}/          │
+└───────────────────────────┬───────────────────────────────────┘
+                            │
+                            ▼
+┌───────────────────────────────────────────────────────────────┐
+│              CopernicusDataProvider.get_data_for_date()        │
+│                  Fusion: SST + Corrientes + Olas               │
+└───────────────────────────┬───────────────────────────────────┘
+                            │
+                            ▼
+┌───────────────────────────────────────────────────────────────┐
+│             FeatureExtractor.extract_from_marine_points()      │
+│                      32 Features Oceanograficos                │
+└───────────────────────────┬───────────────────────────────────┘
+                            │
+                            ▼
+┌───────────────────────────────────────────────────────────────┐
+│              FishingPredictor.fit_unsupervised() / predict()   │
+│              PCA ──► KMeans ──► GradientBoosting ──► Score     │
+└───────────────────────────┬───────────────────────────────────┘
+                            │
+                            ▼
+┌───────────────────────────────────────────────────────────────┐
+│                  MapGenerator.generate_map()                   │
+│                    Mapa HTML Interactivo                       │
+└───────────────────────────────────────────────────────────────┘
+```
 
 ## Caracteristicas Principales
 
@@ -40,7 +214,7 @@ Sistema avanzado de prediccion de puntos optimos de pesca desde orilla para la c
 fishing_predictor/
 ├── domain.py                  # Constantes de dominio centralizadas
 ├── config.py                  # Configuracion del sistema
-├── main.py                    # Punto de entrada principal
+├── main.py                    # Punto de entrada principal (--copernicus flag)
 ├── environment.yml            # Entorno conda
 │
 ├── data/
@@ -51,8 +225,10 @@ fishing_predictor/
 │   ├── raw/                   # BRONZE LAYER (inmutable)
 │   │   ├── gfw/               # Global Fishing Watch (73 archivos)
 │   │   ├── open_meteo/        # Condiciones marinas (73 archivos)
-│   │   └── sst/
-│   │       └── copernicus/    # SST satelital (73 archivos)
+│   │   ├── sst/               # SST satelital Copernicus (73 archivos)
+│   │   ├── currents/          # Corrientes oceanicas Copernicus (24 archivos)
+│   │   ├── waves/             # Olas Copernicus (24 archivos)
+│   │   └── chlorophyll/       # Clorofila-a Copernicus
 │   │
 │   ├── processed/             # SILVER LAYER (regenerable)
 │   │   ├── fishing_consolidated.db
@@ -74,28 +250,32 @@ fishing_predictor/
 │
 ├── models/
 │   ├── features.py            # Extractor de 32 features oceanograficos
-│   ├── predictor.py           # ML: PCA + Gradient Boosting
+│   ├── predictor.py           # ML: PCA + KMeans + Gradient Boosting
 │   ├── timeline.py            # Analisis temporal
 │   └── anchovy_migration.py   # Modelo de migracion
 │
 ├── controllers/
-│   └── analysis.py            # Controlador de analisis
+│   └── analysis.py            # Controlador principal (Copernicus + fallback)
 │
 ├── views/
 │   └── map_view.py            # Generador de mapas Folium
 │
 ├── core/
-│   ├── coastline_real.py      # Procesador de costa OSM
-│   ├── weather_solunar.py     # Clima y calculos solunares
-│   ├── marine_data.py         # Datos marinos y frentes termicos
-│   └── verification_image.py  # Generador de imagenes de verificacion
+│   ├── copernicus_data_provider.py  # Proveedor unificado de datos Copernicus
+│   ├── coastline_real.py            # Procesador de costa OSM (7,741 pts)
+│   ├── weather_solunar.py           # Clima y calculos solunares
+│   ├── marine_data.py               # Datos marinos y frentes termicos
+│   └── verification_image.py        # Generador de imagenes de verificacion
 │
 ├── scripts/
-│   ├── download_incremental.py    # Descarga incremental de datos
-│   ├── update_database.py         # Actualizacion completa de BD
-│   ├── validate_data.py           # Validacion de integridad
-│   ├── migrate_existing_data.py   # Migracion de datos legacy
-│   └── coastline_processing/      # Scripts de procesamiento de costa (one-time)
+│   ├── download_incremental.py          # Descarga incremental de datos
+│   ├── download_copernicus_data.py      # Descarga SST/corrientes/olas
+│   ├── run_prediction_with_copernicus.py # Prediccion con datos Copernicus
+│   ├── test_model_with_real_data.py     # Tests con datos reales
+│   ├── update_database.py               # Actualizacion completa de BD
+│   ├── validate_data.py                 # Validacion de integridad
+│   ├── migrate_existing_data.py         # Migracion de datos legacy
+│   └── coastline_processing/            # Scripts de costa (one-time)
 │
 ├── tests/                     # 18 tests unitarios
 │   └── test_models.py
@@ -156,10 +336,20 @@ python scripts/validate_data.py --all
 
 ## Uso
 
-### Analisis Rapido (sin datos historicos)
+### Analisis Rapido (Open-Meteo - tiempo real)
 
 ```bash
 python main.py
+```
+
+### Analisis con Datos Copernicus (mayor precision)
+
+```bash
+# Usar datos de Copernicus (requiere datos descargados)
+python main.py --copernicus
+
+# Analisis historico con Copernicus
+python main.py --date 2025-01-15 --copernicus
 ```
 
 ### Analisis para fecha especifica
@@ -230,6 +420,8 @@ jupyter lab fishing_analysis.ipynb
 | Bronze | GFW | 73 | 1,305 |
 | Bronze | Open-Meteo | 73 | 216,354 |
 | Bronze | Copernicus SST | 73 | 354,362 |
+| Bronze | Copernicus Corrientes | 24 | ~50,000 |
+| Bronze | Copernicus Olas | 24 | ~50,000 |
 | Silver | Fishing DB | 1 | 1,085 |
 | Silver | Marine DB | 1 | 572,793 |
 | Silver | Training Features | 1 | 213,378 |
@@ -239,9 +431,16 @@ jupyter lab fishing_analysis.ipynb
 | Tipo de Dato | Fuente | Descripcion | Periodo |
 |--------------|--------|-------------|---------|
 | SST | Copernicus Marine OSTIA | Temperatura superficial del mar | 2020-2026 |
-| Olas/Viento | Open-Meteo ERA5 | Reanalisis ECMWF | 2020-2026 |
+| Corrientes | Copernicus GLORYS | Velocidad (uo, vo) en m/s | 2024-2025 |
+| Olas | Copernicus Wave | Altura (VHM0), Periodo (VTPK), Dir (VMDR) | 2024-2025 |
+| Clorofila-a | Copernicus Ocean Colour | Concentracion en mg/m3 | 2024-2025 |
+| Olas/Viento (fallback) | Open-Meteo ERA5 | Reanalisis ECMWF | 2020-2026 |
 | Pesca | Global Fishing Watch | Actividad pesquera AIS | 2020-2026 |
 | Zonas Historicas | IMARPE | Reportes del Instituto del Mar | Climatologia |
+
+### Prioridad de Datos
+1. **Copernicus** (Principal): Datos satelitales de alta precision
+2. **Open-Meteo** (Fallback): Cuando no hay datos de Copernicus disponibles
 
 ## Especies Objetivo (5)
 

@@ -22,13 +22,28 @@
 
 ## Cuestionario Rapido (Version Papel)
 
-### 1. ZONA DE PESCA (marcar una)
-- [ ] Punta Coles / Reserva
-- [ ] Vila Vila / Pozo Redondo
-- [ ] Ilo Puerto / Fundicion
-- [ ] Boca del Rio / Tacna
-- [ ] Punta Mesa / Santa Rosa
-- [ ] Punta Picata / Los Palos
+### 1. ZONA DE PESCA - Norte a Sur (marcar una)
+**Ilo:**
+- [ ] Ilo Puerto
+- [ ] Pozo Lizas
+- [ ] Pocoma
+- [ ] Punta Coles (Reserva)
+- [ ] Media Luna
+- [ ] Fundicion
+- [ ] Pozo Redondo
+- [ ] Punta Blanca
+
+**Ite:**
+- [ ] Gentillar
+- [ ] Ite Sur
+- [ ] Punta Mesa
+
+**Tacna:**
+- [ ] Vila Vila
+- [ ] Los Palos
+- [ ] Santa Rosa
+- [ ] Boca del Rio
+
 - [ ] Otra: ________________
 
 ### 2. CUANDO PESCASTE (ultima salida)
@@ -176,19 +191,25 @@ Cada encuesta genera un registro con:
 | claridad | categoria | "clara" |
 | exito | bool | true (cantidad > 0) |
 
-### Coordenadas por Zona (para el modelo)
+### Coordenadas por Zona (para el modelo) - Norte a Sur
 
-| Zona | Lat | Lon |
-|------|-----|-----|
-| punta_coles | -17.702 | -71.385 |
-| vila_vila | -17.630 | -71.340 |
-| ilo_puerto | -17.640 | -71.340 |
-| pozo_redondo | -17.680 | -71.370 |
-| fundicion | -17.660 | -71.350 |
-| boca_rio | -18.050 | -70.850 |
-| punta_mesa | -17.850 | -71.200 |
-| santa_rosa | -17.750 | -71.300 |
-| punta_picata | -18.200 | -70.900 |
+| Zona | Lat | Lon | Region |
+|------|-----|-----|--------|
+| ilo_puerto | -17.632 | -71.348 | Ilo |
+| pozo_lizas | -17.642 | -71.348 | Ilo |
+| pocoma | -17.682 | -71.377 | Ilo |
+| punta_coles | -17.702 | -71.385 | Ilo |
+| media_luna | -17.732 | -71.280 | Ilo |
+| fundicion | -17.757 | -71.233 | Ilo |
+| pozo_redondo | -17.782 | -71.189 | Ilo |
+| punta_blanca | -17.812 | -71.168 | Ilo |
+| gentillar | -17.842 | -71.113 | Ite |
+| ite_sur | -17.872 | -71.081 | Ite |
+| punta_mesa | -17.988 | -70.889 | Ite |
+| vila_vila | -18.018 | -70.876 | Tacna |
+| los_palos | -18.052 | -70.807 | Tacna |
+| santa_rosa | -18.087 | -70.759 | Tacna |
+| boca_rio | -18.120 | -70.728 | Tacna |
 
 ---
 

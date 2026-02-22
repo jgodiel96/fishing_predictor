@@ -6,7 +6,11 @@
 │  "Ayudanos a crear una app de prediccion gratuita"             │
 ├────────────────────────────────────────────────────────────────┤
 │                                                                │
-│  1. ZONA:  □Coles  □Vila Vila  □Ilo  □Fundicion  □Otro:____   │
+│  1. ZONA (Norte→Sur):                                          │
+│     ILO: □Ilo Pto □Coles □Fundicion □Pozo Redondo □P.Blanca   │
+│     ITE: □Gentillar □Ite Sur □Punta Mesa                       │
+│     TACNA: □Vila Vila □Los Palos □Santa Rosa □Boca Rio        │
+│     □Otra:____                                                 │
 │                                                                │
 │  2. CUANDO: Fecha:___/___  Hora: □Mad □Man □Tar □Noc          │
 │                                                                │

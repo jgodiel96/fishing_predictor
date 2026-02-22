@@ -3,43 +3,58 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Encuesta Pesca - Offline</title>
+    <title>Encuesta Pesca</title>
     <style>
-        * { box-sizing: border-box; font-family: -apple-system, system-ui, sans-serif; }
-        body { margin: 0; padding: 10px; background: #f0f4f8; max-width: 480px; margin: 0 auto; }
-        h1 { text-align: center; color: #2c5282; font-size: 1.3em; margin: 8px 0; }
-        .card { background: white; border-radius: 12px; padding: 12px; margin: 8px 0; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
-        .card h2 { margin: 0 0 8px 0; font-size: 0.95em; color: #4a5568; }
+        * { box-sizing: border-box; font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 0; }
+        body { background: #f0f4f8; max-width: 500px; margin: 0 auto; padding: 10px; }
+        h1 { text-align: center; color: #2c5282; font-size: 1.3em; margin: 10px 0; }
+        .card { background: white; border-radius: 12px; padding: 14px; margin: 10px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .card h2 { margin: 0 0 10px 0; font-size: 1em; color: #2d3748; }
+        .region { margin: 12px 0 6px 0; padding: 4px 10px; background: #4299e1; color: white; border-radius: 6px; font-size: 0.8em; font-weight: 600; }
+        .region.ite { background: #48bb78; }
+        .region.tacna { background: #ed8936; }
+        .zonas { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+        .zona {
+            padding: 8px 12px; background: #f7fafc; border: 2px solid #e2e8f0;
+            border-radius: 8px; cursor: pointer; font-size: 0.85em; transition: all 0.15s;
+        }
+        .zona:active { transform: scale(0.96); }
+        .zona.sel { background: #4299e1; border-color: #4299e1; color: white; }
         .options { display: flex; flex-wrap: wrap; gap: 6px; }
-        .opt { padding: 8px 12px; border: 2px solid #e2e8f0; border-radius: 18px; cursor: pointer; font-size: 0.85em; transition: all 0.15s; }
-        .opt:active { transform: scale(0.95); }
+        .opt {
+            padding: 8px 14px; background: #f7fafc; border: 2px solid #e2e8f0;
+            border-radius: 20px; cursor: pointer; font-size: 0.85em; transition: all 0.15s;
+        }
+        .opt:active { transform: scale(0.96); }
         .opt.sel { background: #4299e1; border-color: #4299e1; color: white; }
         .opt.multi.sel { background: #48bb78; border-color: #48bb78; }
-        input[type="text"], input[type="date"], input[type="number"] {
-            width: 100%; padding: 10px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 1em; margin-top: 5px;
+        input[type="text"], input[type="date"] {
+            width: 100%; padding: 12px; border: 2px solid #e2e8f0;
+            border-radius: 8px; font-size: 1em; margin-top: 6px;
         }
-        .btn { width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 1em; font-weight: 600; cursor: pointer; margin-top: 8px; }
+        .btn {
+            width: 100%; padding: 16px; border: none; border-radius: 12px;
+            font-size: 1.1em; font-weight: 600; cursor: pointer; margin-top: 10px;
+        }
         .btn-p { background: #4299e1; color: white; }
         .btn-s { background: #48bb78; color: white; }
         .btn-g { background: #718096; color: white; }
+        .btn-r { background: #e53e3e; color: white; }
         .btn:active { transform: scale(0.98); opacity: 0.9; }
-        .counter { text-align: center; padding: 8px; background: #ebf8ff; border-radius: 8px; color: #2b6cb0; font-weight: 600; font-size: 0.9em; }
+        .counter { text-align: center; padding: 10px; background: #ebf8ff; border-radius: 8px; color: #2b6cb0; font-weight: 600; }
         .hide { display: none !important; }
-        .ok { background: #c6f6d5; color: #276749; padding: 12px; border-radius: 10px; text-align: center; margin: 15px 0; }
-        .tabs { display: flex; gap: 5px; margin-bottom: 10px; }
-        .tab { flex: 1; padding: 10px; text-align: center; background: #e2e8f0; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.9em; }
+        .ok { background: #c6f6d5; color: #276749; padding: 14px; border-radius: 12px; text-align: center; margin: 15px 0; font-weight: 500; }
+        .tabs { display: flex; gap: 8px; margin-bottom: 10px; }
+        .tab { flex: 1; padding: 12px; text-align: center; background: #e2e8f0; border-radius: 10px; cursor: pointer; font-weight: 600; }
         .tab.act { background: #4299e1; color: white; }
-        .reg { padding: 8px; border-bottom: 1px solid #eee; font-size: 0.85em; }
-        .reg:last-child { border: none; }
-        .mapa-simple { position: relative; width: 100%; height: 180px; background: linear-gradient(to right, #2b6cb0 0%, #2b6cb0 15%, #90cdf4 15%, #90cdf4 100%); border-radius: 8px; margin: 8px 0; overflow: hidden; }
-        .zona-punto { position: absolute; width: 24px; height: 24px; background: white; border: 3px solid #e53e3e; border-radius: 50%; cursor: pointer; transform: translate(-50%, -50%); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; color: #e53e3e; }
-        .zona-punto.sel { background: #e53e3e; color: white; transform: translate(-50%, -50%) scale(1.2); }
-        .zona-punto:hover { transform: translate(-50%, -50%) scale(1.1); }
-        .coords-box { display: flex; gap: 8px; margin-top: 8px; }
-        .coords-box input { flex: 1; }
-        .gps-btn { padding: 10px; background: #805ad5; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 0.85em; }
-        .lista { max-height: 300px; overflow-y: auto; }
-        .nota { font-size: 0.75em; color: #718096; margin-top: 5px; }
+        .reg-item { padding: 10px; border-bottom: 1px solid #eee; font-size: 0.85em; }
+        .reg-item:last-child { border: none; }
+        .coords-row { display: flex; gap: 8px; margin-top: 10px; }
+        .coords-row input { flex: 1; }
+        .gps-btn { padding: 12px 16px; background: #805ad5; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9em; font-weight: 500; }
+        .lista { max-height: 350px; overflow-y: auto; }
+        .info { font-size: 0.75em; color: #718096; margin-top: 6px; }
+        .coord-show { font-size: 0.8em; color: #4a5568; background: #edf2f7; padding: 6px 10px; border-radius: 6px; margin-top: 8px; }
     </style>
 </head>
 <body>
@@ -47,105 +62,108 @@
 <h1>🎣 Encuesta de Pesca</h1>
 
 <div class="tabs">
-    <div class="tab act" onclick="showTab('form')">Nueva</div>
-    <div class="tab" onclick="showTab('hist')">Historial (<span id="cnt">0</span>)</div>
+    <div class="tab act" onclick="showTab('form')">✏️ Nueva</div>
+    <div class="tab" onclick="showTab('hist')">📋 Historial (<span id="cnt">0</span>)</div>
 </div>
 
 <!-- FORMULARIO -->
 <div id="form-tab">
     <div class="counter">✅ Funciona sin internet</div>
 
-    <!-- ZONA -->
+    <!-- 1. ZONA -->
     <div class="card">
-        <h2>1. Zona de pesca</h2>
-        <div class="mapa-simple" id="mapa">
-            <!-- Costa simplificada con puntos de zonas conocidas -->
-            <div style="position:absolute;left:15%;top:0;bottom:0;width:2px;background:#1a365d;"></div>
-            <div style="position:absolute;left:12%;top:10px;color:white;font-size:10px;transform:rotate(-90deg);transform-origin:left;">COSTA</div>
-        </div>
-        <div class="options" id="zonas">
-            <div class="opt" data-v="punta_coles" data-lat="-17.702" data-lon="-71.385">Punta Coles</div>
-            <div class="opt" data-v="vila_vila" data-lat="-17.630" data-lon="-71.340">Vila Vila</div>
-            <div class="opt" data-v="pozo_redondo" data-lat="-17.680" data-lon="-71.370">Pozo Redondo</div>
-            <div class="opt" data-v="ilo_puerto" data-lat="-17.640" data-lon="-71.340">Ilo Puerto</div>
-            <div class="opt" data-v="fundicion" data-lat="-17.660" data-lon="-71.350">Fundicion</div>
-            <div class="opt" data-v="punta_mesa" data-lat="-17.850" data-lon="-71.200">Punta Mesa</div>
-            <div class="opt" data-v="otro">Otra zona...</div>
-        </div>
-        <input type="text" id="otra-zona" class="hide" placeholder="Nombre de la zona">
+        <h2>1. ¿Dónde pescaste?</h2>
 
-        <div class="coords-box">
-            <input type="text" id="lat" placeholder="Latitud (ej: -17.702)">
-            <input type="text" id="lon" placeholder="Longitud (ej: -71.385)">
-            <button class="gps-btn" onclick="obtenerGPS()">📍GPS</button>
+        <div class="region">📍 ILO (Norte)</div>
+        <div class="zonas" id="z-ilo"></div>
+
+        <div class="region ite">📍 ITE (Centro)</div>
+        <div class="zonas" id="z-ite"></div>
+
+        <div class="region tacna">📍 TACNA (Sur)</div>
+        <div class="zonas" id="z-tacna"></div>
+
+        <div style="margin-top:10px;">
+            <div class="zona" id="zona-otra" onclick="toggleOtra()">➕ Otra zona...</div>
+            <input type="text" id="otra-zona" class="hide" placeholder="Nombre de la zona">
         </div>
-        <p class="nota">Opcional: usa GPS o deja en blanco si no quieres compartir ubicacion exacta</p>
+
+        <div class="coords-row">
+            <input type="text" id="lat" placeholder="Latitud">
+            <input type="text" id="lon" placeholder="Longitud">
+            <button class="gps-btn" onclick="getGPS()">📍GPS</button>
+        </div>
+        <p class="info">Opcional: usa GPS si quieres compartir ubicación exacta</p>
+        <div id="coord-show" class="coord-show hide"></div>
     </div>
 
-    <!-- FECHA -->
+    <!-- 2. FECHA -->
     <div class="card">
-        <h2>2. Cuando pescaste</h2>
+        <h2>2. ¿Cuándo?</h2>
         <input type="date" id="fecha">
-        <div class="options" id="hora" style="margin-top:8px;">
-            <div class="opt" data-v="madrugada">🌙 Madrugada</div>
-            <div class="opt" data-v="manana">🌅 Mañana</div>
-            <div class="opt" data-v="tarde">☀️ Tarde</div>
-            <div class="opt" data-v="noche">🌃 Noche</div>
+        <div class="options" style="margin-top:10px;">
+            <div class="opt hora" data-v="madrugada">🌙 Madrugada</div>
+            <div class="opt hora" data-v="manana">🌅 Mañana</div>
+            <div class="opt hora" data-v="tarde">☀️ Tarde</div>
+            <div class="opt hora" data-v="noche">🌃 Noche</div>
         </div>
     </div>
 
-    <!-- CAPTURA -->
+    <!-- 3. CAPTURA -->
     <div class="card">
-        <h2>3. Que capturaste</h2>
-        <div class="options multi" id="especies">
-            <div class="opt multi" data-v="cabrilla">Cabrilla</div>
-            <div class="opt multi" data-v="corvina">Corvina</div>
-            <div class="opt multi" data-v="robalo">Robalo</div>
-            <div class="opt multi" data-v="pejerrey">Pejerrey</div>
-            <div class="opt multi" data-v="lenguado">Lenguado</div>
-            <div class="opt multi" data-v="tramboyo">Tramboyo</div>
-            <div class="opt multi" data-v="otro">Otro</div>
-            <div class="opt multi" data-v="nada">❌ Nada</div>
+        <h2>3. ¿Qué capturaste?</h2>
+        <div class="options">
+            <div class="opt multi esp" data-v="cabrilla">Cabrilla</div>
+            <div class="opt multi esp" data-v="corvina">Corvina</div>
+            <div class="opt multi esp" data-v="robalo">Robalo</div>
+            <div class="opt multi esp" data-v="pejerrey">Pejerrey</div>
+            <div class="opt multi esp" data-v="lenguado">Lenguado</div>
+            <div class="opt multi esp" data-v="tramboyo">Tramboyo</div>
+            <div class="opt multi esp" data-v="chita">Chita</div>
+            <div class="opt multi esp" data-v="otro">Otro</div>
+            <div class="opt multi esp" data-v="nada">❌ Nada</div>
         </div>
-        <h2 style="margin-top:10px;">Cantidad</h2>
-        <div class="options" id="cantidad">
-            <div class="opt" data-v="0">0</div>
-            <div class="opt" data-v="1-2">1-2</div>
-            <div class="opt" data-v="3-5">3-5</div>
-            <div class="opt" data-v="6-10">6-10</div>
-            <div class="opt" data-v="10+">10+</div>
+
+        <h2 style="margin-top:12px;">Cantidad</h2>
+        <div class="options">
+            <div class="opt cant" data-v="0">0</div>
+            <div class="opt cant" data-v="1-2">1-2</div>
+            <div class="opt cant" data-v="3-5">3-5</div>
+            <div class="opt cant" data-v="6-10">6-10</div>
+            <div class="opt cant" data-v="10+">+10</div>
         </div>
     </div>
 
-    <!-- METODO -->
+    <!-- 4. METODO -->
     <div class="card">
-        <h2>4. Metodo</h2>
-        <div class="options" id="metodo">
-            <div class="opt" data-v="spinning">Spinning</div>
-            <div class="opt" data-v="rockfishing">Rockfish</div>
-            <div class="opt" data-v="carnada">Carnada</div>
-            <div class="opt" data-v="otro">Otro</div>
+        <h2>4. Método</h2>
+        <div class="options">
+            <div class="opt met" data-v="spinning">🎣 Spinning</div>
+            <div class="opt met" data-v="rockfishing">🪨 Rockfishing</div>
+            <div class="opt met" data-v="carnada">🪱 Carnada</div>
+            <div class="opt met" data-v="jigging">⚡ Jigging</div>
+            <div class="opt met" data-v="otro">Otro</div>
         </div>
     </div>
 
-    <!-- CONDICIONES -->
+    <!-- 5. CONDICIONES -->
     <div class="card">
         <h2>5. Condiciones</h2>
-        <p style="margin:0 0 5px;color:#718096;font-size:0.85em;">Mar:</p>
-        <div class="options" id="mar">
-            <div class="opt" data-v="calmo">🌊 Calmo</div>
-            <div class="opt" data-v="regular">🌊 Regular</div>
-            <div class="opt" data-v="picado">🌊 Picado</div>
+        <div class="options">
+            <div class="opt mar" data-v="calmo">🌊 Calmo</div>
+            <div class="opt mar" data-v="regular">🌊 Regular</div>
+            <div class="opt mar" data-v="picado">🌊 Picado</div>
         </div>
-        <p style="margin:10px 0 5px;color:#718096;font-size:0.85em;">Agua:</p>
-        <div class="options" id="temp">
-            <div class="opt" data-v="fria">❄️ Fria</div>
-            <div class="opt" data-v="normal">🌡️ Normal</div>
-            <div class="opt" data-v="tibia">🔥 Tibia</div>
+
+        <h2 style="margin-top:12px;">Agua</h2>
+        <div class="options">
+            <div class="opt temp" data-v="fria">❄️ Fría</div>
+            <div class="opt temp" data-v="normal">🌡️ Normal</div>
+            <div class="opt temp" data-v="tibia">🔥 Tibia</div>
         </div>
     </div>
 
-    <button class="btn btn-p" onclick="guardar()">💾 Guardar</button>
+    <button class="btn btn-p" onclick="guardar()">💾 GUARDAR</button>
     <div id="ok" class="ok hide">✅ ¡Guardado!</div>
 </div>
 
@@ -157,149 +175,144 @@
     </div>
     <button class="btn btn-s" onclick="exportar()">📤 Descargar JSON</button>
     <button class="btn btn-g" onclick="copiar()">📋 Copiar datos</button>
-    <button class="btn" style="background:#e53e3e;color:white;margin-top:15px;" onclick="borrarTodo()">🗑️ Borrar todo</button>
+    <button class="btn btn-r" style="margin-top:20px;" onclick="borrar()">🗑️ Borrar todo</button>
 </div>
 
 <script>
-// Datos de zonas para el mapa visual
-const ZONAS = {
-    punta_coles: {lat:-17.702, lon:-71.385, x:20, y:25},
-    vila_vila: {lat:-17.630, lon:-71.340, x:25, y:40},
-    pozo_redondo: {lat:-17.680, lon:-71.370, x:22, y:50},
-    ilo_puerto: {lat:-17.640, lon:-71.340, x:25, y:60},
-    fundicion: {lat:-17.660, lon:-71.350, x:23, y:70},
-    punta_mesa: {lat:-17.850, lon:-71.200, x:35, y:85}
-};
+// Zonas de pesca - domain.py HOTSPOTS (Norte a Sur)
+const ZONAS = [
+    // ILO
+    {id:"ilo_puerto", n:"Ilo Puerto", lat:-17.632, lon:-71.348, r:"ilo"},
+    {id:"pozo_lizas", n:"Pozo Lizas", lat:-17.642, lon:-71.348, r:"ilo"},
+    {id:"pocoma", n:"Pocoma", lat:-17.682, lon:-71.377, r:"ilo"},
+    {id:"punta_coles", n:"Punta Coles", lat:-17.702, lon:-71.385, r:"ilo"},
+    {id:"media_luna", n:"Media Luna", lat:-17.732, lon:-71.280, r:"ilo"},
+    {id:"fundicion", n:"Fundición", lat:-17.757, lon:-71.233, r:"ilo"},
+    {id:"pozo_redondo", n:"Pozo Redondo", lat:-17.782, lon:-71.189, r:"ilo"},
+    {id:"punta_blanca", n:"Punta Blanca", lat:-17.812, lon:-71.168, r:"ilo"},
+    // ITE
+    {id:"gentillar", n:"Gentillar", lat:-17.842, lon:-71.113, r:"ite"},
+    {id:"ite_sur", n:"Ite Sur", lat:-17.872, lon:-71.081, r:"ite"},
+    {id:"ite_centro", n:"Ite Centro", lat:-17.902, lon:-70.998, r:"ite"},
+    {id:"ite_norte", n:"Ite Norte", lat:-17.932, lon:-70.938, r:"ite"},
+    {id:"carlepe", n:"Carlepe", lat:-17.962, lon:-70.905, r:"ite"},
+    {id:"punta_mesa", n:"Punta Mesa", lat:-17.988, lon:-70.889, r:"ite"},
+    // TACNA
+    {id:"vila_vila", n:"Vila Vila", lat:-18.018, lon:-70.876, r:"tacna"},
+    {id:"los_palos", n:"Los Palos", lat:-18.052, lon:-70.807, r:"tacna"},
+    {id:"santa_rosa", n:"Santa Rosa", lat:-18.087, lon:-70.759, r:"tacna"},
+    {id:"boca_rio", n:"Boca del Río", lat:-18.120, lon:-70.728, r:"tacna"},
+];
 
-// Crear puntos en el mapa
-const mapa = document.getElementById('mapa');
-Object.entries(ZONAS).forEach(([id, z]) => {
-    const punto = document.createElement('div');
-    punto.className = 'zona-punto';
-    punto.style.left = z.x + '%';
-    punto.style.top = z.y + '%';
-    punto.textContent = id.charAt(0).toUpperCase();
-    punto.dataset.zona = id;
-    punto.onclick = () => seleccionarZona(id);
-    mapa.appendChild(punto);
-});
+let selZona = null;
 
-// Fecha de hoy
-document.getElementById('fecha').valueAsDate = new Date();
+// Inicializar
+window.onload = function() {
+    // Crear botones de zonas
+    ZONAS.forEach(z => {
+        const btn = document.createElement('div');
+        btn.className = 'zona';
+        btn.textContent = z.n;
+        btn.onclick = () => seleccionarZona(z);
+        document.getElementById('z-' + z.r).appendChild(btn);
+    });
 
-// Seleccion simple
-document.querySelectorAll('.options:not(.multi)').forEach(c => {
-    c.querySelectorAll('.opt').forEach(o => {
+    // Eventos para opciones simples
+    ['hora','cant','met','mar','temp'].forEach(cls => {
+        document.querySelectorAll('.opt.' + cls).forEach(o => {
+            o.onclick = () => {
+                document.querySelectorAll('.opt.' + cls).forEach(x => x.classList.remove('sel'));
+                o.classList.add('sel');
+            };
+        });
+    });
+
+    // Especies (múltiple)
+    document.querySelectorAll('.opt.esp').forEach(o => {
         o.onclick = () => {
-            c.querySelectorAll('.opt').forEach(x => x.classList.remove('sel'));
-            o.classList.add('sel');
-            if (o.dataset.v === 'otro' && c.id === 'zonas') {
-                document.getElementById('otra-zona').classList.remove('hide');
-            } else if (c.id === 'zonas') {
-                document.getElementById('otra-zona').classList.add('hide');
-                // Actualizar coords si tiene
-                if (o.dataset.lat) {
-                    document.getElementById('lat').value = o.dataset.lat;
-                    document.getElementById('lon').value = o.dataset.lon;
-                }
-                // Marcar en mapa
-                document.querySelectorAll('.zona-punto').forEach(p => p.classList.remove('sel'));
-                const punto = document.querySelector(`.zona-punto[data-zona="${o.dataset.v}"]`);
-                if (punto) punto.classList.add('sel');
+            if (o.dataset.v === 'nada') {
+                document.querySelectorAll('.opt.esp').forEach(x => x.classList.remove('sel'));
+            } else {
+                document.querySelector('.opt.esp[data-v="nada"]').classList.remove('sel');
             }
+            o.classList.toggle('sel');
         };
     });
-});
 
-// Seleccionar zona desde mapa
-function seleccionarZona(id) {
-    const zona = ZONAS[id];
-    if (!zona) return;
+    // Fecha hoy
+    document.getElementById('fecha').valueAsDate = new Date();
+    actualizarCnt();
+};
 
-    // Marcar boton
-    document.querySelectorAll('#zonas .opt').forEach(o => {
-        o.classList.toggle('sel', o.dataset.v === id);
-    });
-
-    // Marcar punto
-    document.querySelectorAll('.zona-punto').forEach(p => {
-        p.classList.toggle('sel', p.dataset.zona === id);
-    });
-
-    // Coords
-    document.getElementById('lat').value = zona.lat;
-    document.getElementById('lon').value = zona.lon;
+function seleccionarZona(z) {
+    selZona = z;
+    document.querySelectorAll('.zona').forEach(b => b.classList.remove('sel'));
+    event.target.classList.add('sel');
+    document.getElementById('lat').value = z.lat;
+    document.getElementById('lon').value = z.lon;
+    document.getElementById('coord-show').textContent = '📍 ' + z.n + ': ' + z.lat + ', ' + z.lon;
+    document.getElementById('coord-show').classList.remove('hide');
+    document.getElementById('otra-zona').classList.add('hide');
+    document.getElementById('zona-otra').classList.remove('sel');
 }
 
-// Seleccion multiple
-document.querySelectorAll('.options.multi .opt').forEach(o => {
-    o.onclick = () => {
-        if (o.dataset.v === 'nada') {
-            document.querySelectorAll('#especies .opt').forEach(x => x.classList.remove('sel'));
-            o.classList.add('sel');
-        } else {
-            document.querySelector('#especies .opt[data-v="nada"]').classList.remove('sel');
-            o.classList.toggle('sel');
-        }
-    };
-});
+function toggleOtra() {
+    document.querySelectorAll('.zona').forEach(b => b.classList.remove('sel'));
+    document.getElementById('zona-otra').classList.toggle('sel');
+    document.getElementById('otra-zona').classList.toggle('hide');
+    document.getElementById('coord-show').classList.add('hide');
+    document.getElementById('lat').value = '';
+    document.getElementById('lon').value = '';
+    selZona = null;
+}
 
-// GPS
-function obtenerGPS() {
-    if (!navigator.geolocation) {
-        alert('GPS no disponible');
-        return;
-    }
+function getGPS() {
+    if (!navigator.geolocation) return alert('GPS no disponible');
+    const btn = document.querySelector('.gps-btn');
+    btn.textContent = '⏳';
     navigator.geolocation.getCurrentPosition(
-        pos => {
-            document.getElementById('lat').value = pos.coords.latitude.toFixed(6);
-            document.getElementById('lon').value = pos.coords.longitude.toFixed(6);
-            alert('📍 Ubicacion obtenida');
+        p => {
+            document.getElementById('lat').value = p.coords.latitude.toFixed(6);
+            document.getElementById('lon').value = p.coords.longitude.toFixed(6);
+            document.getElementById('coord-show').textContent = '📍 GPS: ' + p.coords.latitude.toFixed(5) + ', ' + p.coords.longitude.toFixed(5);
+            document.getElementById('coord-show').classList.remove('hide');
+            btn.textContent = '📍GPS';
         },
-        err => alert('Error GPS: ' + err.message),
-        {enableHighAccuracy: true, timeout: 10000}
+        e => { btn.textContent = '📍GPS'; alert('Error: ' + e.message); },
+        {enableHighAccuracy: true, timeout: 15000}
     );
 }
 
-// Guardar
 function guardar() {
-    const zona = document.querySelector('#zonas .opt.sel')?.dataset.v;
-    const otraZona = document.getElementById('otra-zona').value;
     const fecha = document.getElementById('fecha').value;
-    const hora = document.querySelector('#hora .opt.sel')?.dataset.v;
-    const especies = Array.from(document.querySelectorAll('#especies .opt.sel')).map(o => o.dataset.v);
-    const cantidad = document.querySelector('#cantidad .opt.sel')?.dataset.v;
-    const metodo = document.querySelector('#metodo .opt.sel')?.dataset.v;
-    const mar = document.querySelector('#mar .opt.sel')?.dataset.v;
-    const temp = document.querySelector('#temp .opt.sel')?.dataset.v;
-    const lat = document.getElementById('lat').value;
-    const lon = document.getElementById('lon').value;
+    if (!fecha) return alert('Selecciona la fecha');
 
-    if (!zona || !fecha) {
-        alert('Completa zona y fecha');
-        return;
-    }
+    const zonaBtn = document.querySelector('.zona.sel');
+    const otra = document.getElementById('otra-zona').value.trim();
+    if (!zonaBtn && !otra) return alert('Selecciona una zona');
 
     const enc = {
         id: Date.now(),
         ts: new Date().toISOString(),
-        zona: zona === 'otro' ? otraZona : zona,
-        lat: lat ? parseFloat(lat) : null,
-        lon: lon ? parseFloat(lon) : null,
-        fecha, hora: hora || 'manana',
-        especies,
-        cantidad: cantidad || '0',
-        exito: cantidad && cantidad !== '0',
-        metodo: metodo || 'spinning',
-        mar: mar || 'regular',
-        temp: temp || 'normal'
+        zona: selZona ? selZona.id : 'otra',
+        zona_nombre: selZona ? selZona.n : otra,
+        lat: parseFloat(document.getElementById('lat').value) || null,
+        lon: parseFloat(document.getElementById('lon').value) || null,
+        fecha: fecha,
+        hora: document.querySelector('.opt.hora.sel')?.dataset.v || 'manana',
+        especies: Array.from(document.querySelectorAll('.opt.esp.sel')).map(o => o.dataset.v),
+        cantidad: document.querySelector('.opt.cant.sel')?.dataset.v || '0',
+        metodo: document.querySelector('.opt.met.sel')?.dataset.v || 'spinning',
+        mar: document.querySelector('.opt.mar.sel')?.dataset.v || 'regular',
+        temp: document.querySelector('.opt.temp.sel')?.dataset.v || 'normal',
+        exito: (document.querySelector('.opt.cant.sel')?.dataset.v || '0') !== '0'
     };
 
     let data = JSON.parse(localStorage.getItem('enc_pesca') || '[]');
     data.push(enc);
     localStorage.setItem('enc_pesca', JSON.stringify(data));
 
-    actualizar();
+    actualizarCnt();
     document.getElementById('ok').classList.remove('hide');
     setTimeout(() => {
         document.getElementById('ok').classList.add('hide');
@@ -308,22 +321,22 @@ function guardar() {
 }
 
 function limpiar() {
-    document.querySelectorAll('.opt.sel').forEach(o => o.classList.remove('sel'));
-    document.querySelectorAll('.zona-punto.sel').forEach(p => p.classList.remove('sel'));
+    document.querySelectorAll('.sel').forEach(e => e.classList.remove('sel'));
     document.getElementById('otra-zona').value = '';
     document.getElementById('otra-zona').classList.add('hide');
     document.getElementById('lat').value = '';
     document.getElementById('lon').value = '';
+    document.getElementById('coord-show').classList.add('hide');
     document.getElementById('fecha').valueAsDate = new Date();
+    selZona = null;
 }
 
-function actualizar() {
-    const data = JSON.parse(localStorage.getItem('enc_pesca') || '[]');
-    document.getElementById('cnt').textContent = data.length;
+function actualizarCnt() {
+    document.getElementById('cnt').textContent = JSON.parse(localStorage.getItem('enc_pesca') || '[]').length;
 }
 
 function showTab(t) {
-    document.querySelectorAll('.tab').forEach((x,i) => x.classList.toggle('act', (t==='form' && i===0) || (t==='hist' && i===1)));
+    document.querySelectorAll('.tab').forEach((x,i) => x.classList.toggle('act', (t==='form'&&i===0)||(t==='hist'&&i===1)));
     document.getElementById('form-tab').classList.toggle('hide', t !== 'form');
     document.getElementById('hist-tab').classList.toggle('hide', t !== 'hist');
     if (t === 'hist') mostrarLista();
@@ -331,61 +344,49 @@ function showTab(t) {
 
 function mostrarLista() {
     const data = JSON.parse(localStorage.getItem('enc_pesca') || '[]');
-    const lista = document.getElementById('lista');
-    if (!data.length) {
-        lista.innerHTML = '<p style="color:#888">Sin datos</p>';
-        return;
-    }
-    lista.innerHTML = data.slice().reverse().map(e => `
-        <div class="reg">
-            <b>${e.zona}</b> - ${e.fecha} ${e.hora || ''}<br>
-            ${e.especies?.join(', ') || 'nada'} (${e.cantidad}) | ${e.metodo}<br>
-            <small>Mar: ${e.mar} | Agua: ${e.temp}</small>
-            ${e.lat ? `<br><small>📍 ${e.lat}, ${e.lon}</small>` : ''}
+    const el = document.getElementById('lista');
+    if (!data.length) { el.innerHTML = '<p style="padding:15px;color:#888">Sin encuestas</p>'; return; }
+    el.innerHTML = data.slice().reverse().map((e,i) => `
+        <div class="reg-item">
+            <b>#${data.length-i} ${e.zona_nombre}</b> - ${e.fecha} ${e.hora}<br>
+            🎣 ${e.especies.join(', ')||'nada'} (${e.cantidad}) · ${e.metodo}<br>
+            <small>🌊 ${e.mar} · 🌡️ ${e.temp}${e.lat ? ' · 📍'+e.lat.toFixed(3)+','+e.lon.toFixed(3) : ''}</small>
         </div>
     `).join('');
 }
 
 function exportar() {
     const data = JSON.parse(localStorage.getItem('enc_pesca') || '[]');
-    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
-    const url = URL.createObjectURL(blob);
+    if (!data.length) return alert('Sin datos');
+    const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
     const a = document.createElement('a');
-    a.href = url;
-    a.download = 'encuestas_' + new Date().toISOString().split('T')[0] + '.json';
+    a.href = URL.createObjectURL(blob);
+    a.download = 'encuestas_'+new Date().toISOString().slice(0,10)+'.json';
     a.click();
-    URL.revokeObjectURL(url);
 }
 
 function copiar() {
     const data = JSON.parse(localStorage.getItem('enc_pesca') || '[]');
-    const texto = JSON.stringify(data, null, 2);
-
-    // Fallback para dispositivos sin clipboard API
+    if (!data.length) return alert('Sin datos');
+    const t = JSON.stringify(data,null,2);
     if (navigator.clipboard) {
-        navigator.clipboard.writeText(texto).then(() => alert('✅ Copiado'));
+        navigator.clipboard.writeText(t).then(() => alert('✅ Copiado'));
     } else {
         const ta = document.createElement('textarea');
-        ta.value = texto;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
+        ta.value = t; document.body.appendChild(ta); ta.select();
+        document.execCommand('copy'); document.body.removeChild(ta);
         alert('✅ Copiado');
     }
 }
 
-function borrarTodo() {
-    if (confirm('¿Borrar TODAS las encuestas? Esta accion no se puede deshacer.')) {
+function borrar() {
+    const n = JSON.parse(localStorage.getItem('enc_pesca') || '[]').length;
+    if (!n) return alert('Sin datos');
+    if (confirm('¿Borrar ' + n + ' encuesta(s)?')) {
         localStorage.removeItem('enc_pesca');
-        actualizar();
-        mostrarLista();
-        alert('Datos borrados');
+        actualizarCnt(); mostrarLista();
     }
 }
-
-// Init
-actualizar();
 </script>
 </body>
 </html>

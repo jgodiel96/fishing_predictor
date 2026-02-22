@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Mapa de Pesca - Offline</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, system-ui, sans-serif; }
+        body { background: #0a1628; color: #e2e8f0; min-height: 100vh; }
+
+        .header {
+            background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
+            padding: 12px 15px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        .header h1 { font-size: 1.1em; display: flex; align-items: center; gap: 8px; }
+        .header .fecha { font-size: 0.75em; color: #90cdf4; margin-top: 4px; }
+
+        .tabs {
+            display: flex;
+            background: #1a2d4a;
+            border-bottom: 1px solid #2d4a6f;
+        }
+        .tab {
+            flex: 1;
+            padding: 12px;
+            text-align: center;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 500;
+            color: #90cdf4;
+            border-bottom: 3px solid transparent;
+        }
+        .tab.active {
+            color: #fff;
+            background: #234567;
+            border-bottom-color: #4299e1;
+        }
+
+        .content { padding: 10px; }
+        .hide { display: none !important; }
+
+        /* Mapa visual */
+        .mapa-container {
+            background: linear-gradient(180deg, #1a365d 0%, #2b4a7a 50%, #1e3a5f 100%);
+            border-radius: 12px;
+            padding: 10px;
+            margin-bottom: 15px;
+            position: relative;
+            min-height: 400px;
+        }
+        .mapa-titulo {
+            text-align: center;
+            font-size: 0.8em;
+            color: #90cdf4;
+            margin-bottom: 10px;
+        }
+        .costa-linea {
+            position: absolute;
+            left: 8%;
+            top: 40px;
+            bottom: 20px;
+            width: 4px;
+            background: linear-gradient(180deg, #c4a574 0%, #8b7355 100%);
+            border-radius: 2px;
+        }
+        .region-label {
+            position: absolute;
+            left: 14%;
+            font-size: 0.65em;
+            font-weight: bold;
+            color: #ffd700;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+        }
+        .spot {
+            position: absolute;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .spot:active { transform: scale(1.05); }
+        .spot-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 2px solid #fff;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+        .spot-name {
+            font-size: 0.7em;
+            color: #fff;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+            white-space: nowrap;
+        }
+        .spot-score {
+            font-size: 0.65em;
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        /* Lista de spots */
+        .spot-card {
+            background: linear-gradient(135deg, #1e3a5f 0%, #2d4a6f 100%);
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-left: 4px solid #4299e1;
+        }
+        .spot-card.excelente { border-left-color: #48bb78; }
+        .spot-card.bueno { border-left-color: #68d391; }
+        .spot-card.regular { border-left-color: #ecc94b; }
+        .spot-card.bajo { border-left-color: #ed8936; }
+
+        .spot-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .spot-card-name { font-weight: 600; font-size: 1em; }
+        .spot-card-score {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        .score-excelente { background: #48bb78; color: #fff; }
+        .score-bueno { background: #68d391; color: #1a202c; }
+        .score-regular { background: #ecc94b; color: #1a202c; }
+        .score-bajo { background: #ed8936; color: #fff; }
+
+        .spot-card-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            font-size: 0.8em;
+            color: #a0aec0;
+        }
+        .spot-card-desc {
+            grid-column: 1 / -1;
+            font-size: 0.75em;
+            color: #90cdf4;
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid #2d4a6f;
+        }
+
+        /* Condiciones */
+        .condiciones {
+            background: #1e3a5f;
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 15px;
+        }
+        .condiciones h3 {
+            font-size: 0.9em;
+            margin-bottom: 10px;
+            color: #90cdf4;
+        }
+        .cond-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        .cond-item {
+            background: #234567;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .cond-icon { font-size: 1.5em; }
+        .cond-label { font-size: 0.7em; color: #90cdf4; margin-top: 4px; }
+        .cond-value { font-size: 0.9em; font-weight: 600; margin-top: 2px; }
+
+        /* Especies */
+        .especies-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+        .especie-card {
+            background: #1e3a5f;
+            border-radius: 8px;
+            padding: 10px;
+        }
+        .especie-name { font-weight: 600; font-size: 0.9em; }
+        .especie-temp { font-size: 0.75em; color: #90cdf4; margin-top: 4px; }
+        .especie-lure { font-size: 0.7em; color: #a0aec0; margin-top: 4px; }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 15px;
+            font-size: 0.7em;
+            color: #4a5568;
+        }
+
+        .region-section {
+            margin-bottom: 15px;
+        }
+        .region-header {
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.85em;
+            margin-bottom: 8px;
+        }
+        .region-ilo { background: #2b6cb0; }
+        .region-ite { background: #2f855a; }
+        .region-tacna { background: #c05621; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>🎣 Mapa de Pesca - Tacna/Ilo</h1>
+    <div class="fecha">📅 22 Feb 2026 | 🌙 Luna Creciente | 🌡️ 26°C</div>
+</div>
+
+<div class="tabs">
+    <div class="tab active" onclick="showTab('mapa')">🗺️ Mapa</div>
+    <div class="tab" onclick="showTab('lista')">📋 Lista</div>
+    <div class="tab" onclick="showTab('info')">ℹ️ Info</div>
+</div>
+
+<div class="content">
+    <!-- TAB MAPA -->
+    <div id="tab-mapa">
+        <div class="condiciones">
+            <h3>Condiciones Actuales</h3>
+            <div class="cond-grid">
+                <div class="cond-item">
+                    <div class="cond-icon">🌡️</div>
+                    <div class="cond-label">Temperatura</div>
+                    <div class="cond-value">26°C</div>
+                </div>
+                <div class="cond-item">
+                    <div class="cond-icon">🌊</div>
+                    <div class="cond-label">Oleaje</div>
+                    <div class="cond-value">1.2m</div>
+                </div>
+                <div class="cond-item">
+                    <div class="cond-icon">🌙</div>
+                    <div class="cond-label">Luna</div>
+                    <div class="cond-value">Creciente</div>
+                </div>
+                <div class="cond-item">
+                    <div class="cond-icon">💨</div>
+                    <div class="cond-label">Viento</div>
+                    <div class="cond-value">12 km/h</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="mapa-container" id="mapa">
+            <div class="mapa-titulo">← COSTA &nbsp;|&nbsp; MAR → &nbsp;(Norte ↑ Sur ↓)</div>
+            <div class="costa-linea"></div>
+            <div class="region-label" style="top:50px;">ILO</div>
+            <div class="region-label" style="top:200px;">ITE</div>
+            <div class="region-label" style="top:320px;">TACNA</div>
+        </div>
+    </div>
+
+    <!-- TAB LISTA -->
+    <div id="tab-lista" class="hide">
+        <div class="region-section">
+            <div class="region-header region-ilo">📍 ILO (Norte) - 8 spots</div>
+            <div id="lista-ilo"></div>
+        </div>
+        <div class="region-section">
+            <div class="region-header region-ite">📍 ITE (Centro) - 6 spots</div>
+            <div id="lista-ite"></div>
+        </div>
+        <div class="region-section">
+            <div class="region-header region-tacna">📍 TACNA (Sur) - 4 spots</div>
+            <div id="lista-tacna"></div>
+        </div>
+    </div>
+
+    <!-- TAB INFO -->
+    <div id="tab-info" class="hide">
+        <div class="condiciones">
+            <h3>🎯 Especies Objetivo</h3>
+            <div class="especies-grid">
+                <div class="especie-card">
+                    <div class="especie-name">🐟 Cabrilla</div>
+                    <div class="especie-temp">16-19°C | Roca</div>
+                    <div class="especie-lure">Grubs 3", jigs 15-25g</div>
+                </div>
+                <div class="especie-card">
+                    <div class="especie-name">🐟 Corvina</div>
+                    <div class="especie-temp">15-18°C | Arena</div>
+                    <div class="especie-lure">Jigs metálicos 30-50g</div>
+                </div>
+                <div class="especie-card">
+                    <div class="especie-name">🐟 Robalo</div>
+                    <div class="especie-temp">17-21°C | Roca/Mixto</div>
+                    <div class="especie-lure">Poppers 12cm, minnows</div>
+                </div>
+                <div class="especie-card">
+                    <div class="especie-name">🐟 Lenguado</div>
+                    <div class="especie-temp">14-17°C | Arena</div>
+                    <div class="especie-lure">Vinilos paddle tail</div>
+                </div>
+                <div class="especie-card">
+                    <div class="especie-name">🐟 Pejerrey</div>
+                    <div class="especie-temp">14-18°C | Arena/Mixto</div>
+                    <div class="especie-lure">Cucharillas pequeñas</div>
+                </div>
+                <div class="especie-card">
+                    <div class="especie-name">🐟 Tramboyo</div>
+                    <div class="especie-temp">15-19°C | Roca</div>
+                    <div class="especie-lure">Jigs, carnada</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="condiciones">
+            <h3>📊 Interpretación de Scores</h3>
+            <div style="font-size:0.85em; line-height:1.6;">
+                <p><span class="spot-card-score score-excelente">80-100</span> Excelente - Condiciones óptimas</p>
+                <p style="margin-top:8px;"><span class="spot-card-score score-bueno">60-79</span> Bueno - Buen potencial</p>
+                <p style="margin-top:8px;"><span class="spot-card-score score-regular">40-59</span> Regular - Condiciones promedio</p>
+                <p style="margin-top:8px;"><span class="spot-card-score score-bajo">0-39</span> Bajo - Condiciones difíciles</p>
+            </div>
+        </div>
+
+        <div class="condiciones">
+            <h3>ℹ️ Acerca de</h3>
+            <p style="font-size:0.8em; color:#a0aec0; line-height:1.5;">
+                Predicciones basadas en: SST, corrientes, oleaje, fase lunar,
+                frentes térmicos y datos históricos de IMARPE.
+                <br><br>
+                <strong>Fuentes:</strong> Copernicus Marine, Open-Meteo, Global Fishing Watch
+                <br><br>
+                <strong>Versión:</strong> 2026-02-22 (Offline)
+            </p>
+        </div>
+    </div>
+</div>
+
+<div class="footer">
+    Fishing Predictor v2.0 - 100% Offline<br>
+    Datos: 22 Feb 2026
+</div>
+
+<script>
+// Datos de spots con scores calculados
+const SPOTS = [
+    // ILO
+    {id:"ilo_puerto", nombre:"Ilo Puerto", lat:-17.632, lon:-71.348, region:"ilo", sustrato:"Mixto", bonus:1.1, desc:"Muelle y rocas adyacentes", score:52},
+    {id:"pozo_lizas", nombre:"Pozo Lizas", lat:-17.642, lon:-71.348, region:"ilo", sustrato:"Roca", bonus:1.2, desc:"Pozas entre rocas, ideal spinning", score:58},
+    {id:"pocoma", nombre:"Pocoma", lat:-17.682, lon:-71.377, region:"ilo", sustrato:"Roca", bonus:1.15, desc:"Acantilados rocosos", score:54},
+    {id:"punta_coles", nombre:"Punta Coles", lat:-17.702, lon:-71.385, region:"ilo", sustrato:"Roca", bonus:1.35, desc:"Reserva, mucha vida marina", score:68},
+    {id:"media_luna", nombre:"Media Luna", lat:-17.732, lon:-71.280, region:"ilo", sustrato:"Arena", bonus:1.1, desc:"Bahía arenosa", score:48},
+    {id:"fundicion", nombre:"Fundición", lat:-17.757, lon:-71.233, region:"ilo", sustrato:"Roca", bonus:1.2, desc:"Rocas grandes, estructura compleja", score:56},
+    {id:"pozo_redondo", nombre:"Pozo Redondo", lat:-17.782, lon:-71.189, region:"ilo", sustrato:"Mixto", bonus:1.25, desc:"Pozas naturales entre rocas", score:62},
+    {id:"punta_blanca", nombre:"Punta Blanca", lat:-17.812, lon:-71.168, region:"ilo", sustrato:"Roca", bonus:1.3, desc:"Punta rocosa, buena para robalo", score:65},
+    // ITE
+    {id:"gentillar", nombre:"Gentillar", lat:-17.842, lon:-71.113, region:"ite", sustrato:"Roca", bonus:1.15, desc:"Costa rocosa escarpada", score:51},
+    {id:"ite_sur", nombre:"Ite Sur", lat:-17.872, lon:-71.081, region:"ite", sustrato:"Roca", bonus:1.2, desc:"Formaciones rocosas, cabrilla", score:55},
+    {id:"ite_centro", nombre:"Ite Centro", lat:-17.902, lon:-70.998, region:"ite", sustrato:"Mixto", bonus:1.15, desc:"Zona mixta productiva", score:50},
+    {id:"ite_norte", nombre:"Ite Norte", lat:-17.932, lon:-70.938, region:"ite", sustrato:"Arena", bonus:1.2, desc:"Playa amplia, surgencia activa", score:53},
+    {id:"carlepe", nombre:"Carlepe", lat:-17.962, lon:-70.905, region:"ite", sustrato:"Mixto", bonus:1.1, desc:"Rocas y arena alternadas", score:47},
+    {id:"punta_mesa", nombre:"Punta Mesa", lat:-17.988, lon:-70.889, region:"ite", sustrato:"Roca", bonus:1.15, desc:"Punta rocosa con pozas", score:52},
+    // TACNA
+    {id:"vila_vila", nombre:"Vila Vila", lat:-18.018, lon:-70.876, region:"tacna", sustrato:"Roca", bonus:1.25, desc:"Zona rocosa, buena estructura", score:58},
+    {id:"los_palos", nombre:"Los Palos", lat:-18.052, lon:-70.807, region:"tacna", sustrato:"Mixto", bonus:1.1, desc:"Arena con rocas dispersas", score:45},
+    {id:"santa_rosa", nombre:"Santa Rosa", lat:-18.087, lon:-70.759, region:"tacna", sustrato:"Arena", bonus:1.15, desc:"Playa extensa, buena para corvina", score:49},
+    {id:"boca_rio", nombre:"Boca del Río", lat:-18.120, lon:-70.728, region:"tacna", sustrato:"Arena", bonus:1.2, desc:"Desembocadura, playa arenosa", score:46},
+];
+
+// Calcular posiciones en el mapa
+const LAT_MIN = -18.120, LAT_MAX = -17.632;
+const LON_MIN = -71.385, LON_MAX = -70.728;
+
+function getScoreClass(score) {
+    if (score >= 80) return 'excelente';
+    if (score >= 60) return 'bueno';
+    if (score >= 40) return 'regular';
+    return 'bajo';
+}
+
+function getScoreColor(score) {
+    if (score >= 80) return '#48bb78';
+    if (score >= 60) return '#68d391';
+    if (score >= 40) return '#ecc94b';
+    return '#ed8936';
+}
+
+function initMapa() {
+    const mapa = document.getElementById('mapa');
+
+    SPOTS.forEach((spot, idx) => {
+        // Calcular posición
+        const y = ((spot.lat - LAT_MAX) / (LAT_MIN - LAT_MAX)) * 320 + 50;
+        const x = ((spot.lon - LON_MIN) / (LON_MAX - LON_MIN)) * 65 + 20;
+
+        const el = document.createElement('div');
+        el.className = 'spot';
+        el.style.left = x + '%';
+        el.style.top = y + 'px';
+        el.onclick = () => showSpotDetail(spot);
+
+        el.innerHTML = `
+            <div class="spot-dot" style="background:${getScoreColor(spot.score)}"></div>
+            <span class="spot-name">${spot.nombre.split(' ')[0]}</span>
+            <span class="spot-score" style="background:${getScoreColor(spot.score)};color:#fff">${spot.score}</span>
+        `;
+
+        mapa.appendChild(el);
+    });
+}
+
+function initListas() {
+    ['ilo', 'ite', 'tacna'].forEach(region => {
+        const container = document.getElementById('lista-' + region);
+        const spots = SPOTS.filter(s => s.region === region).sort((a,b) => b.score - a.score);
+
+        spots.forEach(spot => {
+            const scoreClass = getScoreClass(spot.score);
+            container.innerHTML += `
+                <div class="spot-card ${scoreClass}" onclick="showSpotDetail(SPOTS.find(s=>s.id==='${spot.id}'))">
+                    <div class="spot-card-header">
+                        <span class="spot-card-name">${spot.nombre}</span>
+                        <span class="spot-card-score score-${scoreClass}">${spot.score}/100</span>
+                    </div>
+                    <div class="spot-card-info">
+                        <span>📍 ${spot.lat.toFixed(3)}, ${spot.lon.toFixed(3)}</span>
+                        <span>🪨 ${spot.sustrato}</span>
+                    </div>
+                    <div class="spot-card-desc">${spot.desc}</div>
+                </div>
+            `;
+        });
+    });
+}
+
+function showSpotDetail(spot) {
+    const scoreClass = getScoreClass(spot.score);
+    alert(
+        `📍 ${spot.nombre}\n\n` +
+        `Score: ${spot.score}/100 (${scoreClass})\n` +
+        `Sustrato: ${spot.sustrato}\n` +
+        `Coords: ${spot.lat}, ${spot.lon}\n\n` +
+        `${spot.desc}\n\n` +
+        `Bonus histórico: x${spot.bonus}`
+    );
+}
+
+function showTab(tab) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.content > div').forEach(d => d.classList.add('hide'));
+
+    event.target.classList.add('active');
+    document.getElementById('tab-' + tab).classList.remove('hide');
+}
+
+// Inicializar
+document.addEventListener('DOMContentLoaded', () => {
+    initMapa();
+    initListas();
+});
+</script>
+</body>
+</html>

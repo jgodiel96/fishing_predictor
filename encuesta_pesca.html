@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Encuesta de Pesca - Tacna/Ilo</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        body {
+            margin: 0;
+            padding: 10px;
+            background: #f5f5f5;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: #2c5282;
+            font-size: 1.4em;
+            margin: 10px 0;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 15px;
+            margin: 10px 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .card h2 {
+            margin: 0 0 10px 0;
+            font-size: 1em;
+            color: #4a5568;
+        }
+        .options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .option {
+            padding: 8px 14px;
+            border: 2px solid #e2e8f0;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.9em;
+        }
+        .option:hover {
+            border-color: #4299e1;
+        }
+        .option.selected {
+            background: #4299e1;
+            border-color: #4299e1;
+            color: white;
+        }
+        .option.multi.selected {
+            background: #48bb78;
+            border-color: #48bb78;
+        }
+        #map {
+            height: 200px;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+        .map-hint {
+            font-size: 0.8em;
+            color: #718096;
+            margin-top: 5px;
+        }
+        .location-display {
+            font-size: 0.85em;
+            color: #2d3748;
+            background: #edf2f7;
+            padding: 5px 10px;
+            border-radius: 5px;
+            margin-top: 8px;
+        }
+        input[type="text"], input[type="date"], input[type="number"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 1em;
+            margin-top: 5px;
+        }
+        input:focus {
+            outline: none;
+            border-color: #4299e1;
+        }
+        .btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        .btn-primary {
+            background: #4299e1;
+            color: white;
+        }
+        .btn-success {
+            background: #48bb78;
+            color: white;
+        }
+        .btn-secondary {
+            background: #718096;
+            color: white;
+        }
+        .btn:active {
+            transform: scale(0.98);
+        }
+        .counter {
+            text-align: center;
+            padding: 10px;
+            background: #ebf8ff;
+            border-radius: 8px;
+            color: #2b6cb0;
+            font-weight: bold;
+        }
+        .hidden {
+            display: none;
+        }
+        .success-msg {
+            background: #c6f6d5;
+            color: #276749;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        #historial {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .registro {
+            padding: 10px;
+            border-bottom: 1px solid #e2e8f0;
+            font-size: 0.9em;
+        }
+        .registro:last-child {
+            border-bottom: none;
+        }
+        .tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 15px;
+        }
+        .tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            background: #e2e8f0;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .tab.active {
+            background: #4299e1;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎣 Encuesta de Pesca</h1>
+
+    <div class="tabs">
+        <div class="tab active" onclick="showTab('encuesta')">Nueva</div>
+        <div class="tab" onclick="showTab('historial')">Historial</div>
+    </div>
+
+    <!-- TAB ENCUESTA -->
+    <div id="tab-encuesta">
+        <div class="counter">
+            Encuestas guardadas: <span id="total">0</span>
+        </div>
+
+        <!-- 1. ZONA -->
+        <div class="card">
+            <h2>1. Zona de pesca</h2>
+            <div class="options" id="zonas">
+                <div class="option" data-value="punta_coles">Punta Coles</div>
+                <div class="option" data-value="vila_vila">Vila Vila</div>
+                <div class="option" data-value="pozo_redondo">Pozo Redondo</div>
+                <div class="option" data-value="ilo_puerto">Ilo Puerto</div>
+                <div class="option" data-value="fundicion">Fundicion</div>
+                <div class="option" data-value="punta_mesa">Punta Mesa</div>
+                <div class="option" data-value="otro">Otra...</div>
+            </div>
+            <input type="text" id="otra-zona" class="hidden" placeholder="Nombre de la zona">
+
+            <div id="map"></div>
+            <p class="map-hint">📍 Opcional: toca el mapa para marcar ubicacion exacta</p>
+            <div id="coords" class="location-display hidden"></div>
+        </div>
+
+        <!-- 2. FECHA Y HORA -->
+        <div class="card">
+            <h2>2. Cuando pescaste</h2>
+            <input type="date" id="fecha" value="">
+            <div class="options" id="hora" style="margin-top: 10px;">
+                <div class="option" data-value="madrugada">🌙 Madrugada</div>
+                <div class="option" data-value="manana">🌅 Mañana</div>
+                <div class="option" data-value="tarde">☀️ Tarde</div>
+                <div class="option" data-value="noche">🌃 Noche</div>
+            </div>
+        </div>
+
+        <!-- 3. CAPTURA -->
+        <div class="card">
+            <h2>3. Que capturaste (puedes elegir varias)</h2>
+            <div class="options multi" id="especies">
+                <div class="option multi" data-value="cabrilla">Cabrilla</div>
+                <div class="option multi" data-value="corvina">Corvina</div>
+                <div class="option multi" data-value="robalo">Robalo</div>
+                <div class="option multi" data-value="pejerrey">Pejerrey</div>
+                <div class="option multi" data-value="lenguado">Lenguado</div>
+                <div class="option multi" data-value="tramboyo">Tramboyo</div>
+                <div class="option multi" data-value="otro">Otro</div>
+                <div class="option multi" data-value="nada">❌ Nada</div>
+            </div>
+
+            <h2 style="margin-top: 15px;">Cantidad total</h2>
+            <div class="options" id="cantidad">
+                <div class="option" data-value="0">0</div>
+                <div class="option" data-value="1-2">1-2</div>
+                <div class="option" data-value="3-5">3-5</div>
+                <div class="option" data-value="6-10">6-10</div>
+                <div class="option" data-value="10+">10+</div>
+            </div>
+        </div>
+
+        <!-- 4. METODO -->
+        <div class="card">
+            <h2>4. Metodo de pesca</h2>
+            <div class="options" id="metodo">
+                <div class="option" data-value="spinning">Spinning</div>
+                <div class="option" data-value="rockfishing">Rockfishing</div>
+                <div class="option" data-value="carnada">Carnada</div>
+                <div class="option" data-value="otro">Otro</div>
+            </div>
+        </div>
+
+        <!-- 5. CONDICIONES -->
+        <div class="card">
+            <h2>5. Condiciones</h2>
+            <p style="margin: 5px 0; color: #718096;">Estado del mar:</p>
+            <div class="options" id="mar">
+                <div class="option" data-value="calmo">🌊 Calmo</div>
+                <div class="option" data-value="regular">🌊 Regular</div>
+                <div class="option" data-value="picado">🌊 Picado</div>
+            </div>
+
+            <p style="margin: 15px 0 5px 0; color: #718096;">Temperatura del agua:</p>
+            <div class="options" id="temp">
+                <div class="option" data-value="fria">❄️ Fria</div>
+                <div class="option" data-value="normal">🌡️ Normal</div>
+                <div class="option" data-value="tibia">🔥 Tibia</div>
+            </div>
+        </div>
+
+        <!-- GUARDAR -->
+        <button class="btn btn-primary" onclick="guardar()">💾 Guardar Encuesta</button>
+
+        <div id="success" class="success-msg hidden">
+            ✅ ¡Encuesta guardada! Gracias por tu ayuda.
+        </div>
+    </div>
+
+    <!-- TAB HISTORIAL -->
+    <div id="tab-historial" class="hidden">
+        <div class="card">
+            <h2>📋 Encuestas guardadas</h2>
+            <div id="historial"></div>
+        </div>
+        <button class="btn btn-success" onclick="exportar()">📤 Exportar datos (JSON)</button>
+        <button class="btn btn-secondary" onclick="copiarDatos()">📋 Copiar al portapapeles</button>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Coordenadas de zonas conocidas
+        const ZONAS_COORDS = {
+            "punta_coles": {lat: -17.702, lon: -71.385},
+            "vila_vila": {lat: -17.630, lon: -71.340},
+            "pozo_redondo": {lat: -17.680, lon: -71.370},
+            "ilo_puerto": {lat: -17.640, lon: -71.340},
+            "fundicion": {lat: -17.660, lon: -71.350},
+            "punta_mesa": {lat: -17.850, lon: -71.200},
+        };
+
+        // Estado
+        let selectedLat = null;
+        let selectedLon = null;
+        let marker = null;
+
+        // Inicializar mapa
+        const map = L.map('map').setView([-17.7, -71.35], 10);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OSM'
+        }).addTo(map);
+
+        // Click en mapa
+        map.on('click', function(e) {
+            selectedLat = e.latlng.lat;
+            selectedLon = e.latlng.lng;
+
+            if (marker) {
+                marker.setLatLng(e.latlng);
+            } else {
+                marker = L.marker(e.latlng).addTo(map);
+            }
+
+            document.getElementById('coords').classList.remove('hidden');
+            document.getElementById('coords').textContent =
+                `📍 ${selectedLat.toFixed(4)}, ${selectedLon.toFixed(4)}`;
+        });
+
+        // Fecha de hoy por defecto
+        document.getElementById('fecha').valueAsDate = new Date();
+
+        // Seleccion simple
+        document.querySelectorAll('.options:not(.multi)').forEach(container => {
+            container.querySelectorAll('.option').forEach(opt => {
+                opt.addEventListener('click', () => {
+                    container.querySelectorAll('.option').forEach(o => o.classList.remove('selected'));
+                    opt.classList.add('selected');
+
+                    // Mostrar input si es "otro"
+                    if (opt.dataset.value === 'otro' && container.id === 'zonas') {
+                        document.getElementById('otra-zona').classList.remove('hidden');
+                    } else if (container.id === 'zonas') {
+                        document.getElementById('otra-zona').classList.add('hidden');
+                        // Mover mapa a zona seleccionada
+                        const coords = ZONAS_COORDS[opt.dataset.value];
+                        if (coords) {
+                            map.setView([coords.lat, coords.lon], 13);
+                        }
+                    }
+                });
+            });
+        });
+
+        // Seleccion multiple (especies)
+        document.querySelectorAll('.options.multi .option').forEach(opt => {
+            opt.addEventListener('click', () => {
+                if (opt.dataset.value === 'nada') {
+                    // Si selecciona "nada", deseleccionar todo lo demas
+                    document.querySelectorAll('#especies .option').forEach(o => o.classList.remove('selected'));
+                    opt.classList.add('selected');
+                } else {
+                    // Deseleccionar "nada" si selecciona otra cosa
+                    document.querySelector('#especies .option[data-value="nada"]').classList.remove('selected');
+                    opt.classList.toggle('selected');
+                }
+            });
+        });
+
+        // Guardar encuesta
+        function guardar() {
+            const zona = document.querySelector('#zonas .option.selected')?.dataset.value;
+            const otraZona = document.getElementById('otra-zona').value;
+            const fecha = document.getElementById('fecha').value;
+            const hora = document.querySelector('#hora .option.selected')?.dataset.value;
+            const especies = Array.from(document.querySelectorAll('#especies .option.selected'))
+                .map(o => o.dataset.value);
+            const cantidad = document.querySelector('#cantidad .option.selected')?.dataset.value;
+            const metodo = document.querySelector('#metodo .option.selected')?.dataset.value;
+            const mar = document.querySelector('#mar .option.selected')?.dataset.value;
+            const temp = document.querySelector('#temp .option.selected')?.dataset.value;
+
+            // Validar minimo
+            if (!zona || !fecha) {
+                alert('Por favor completa al menos la zona y fecha');
+                return;
+            }
+
+            const encuesta = {
+                id: Date.now(),
+                timestamp: new Date().toISOString(),
+                zona: zona === 'otro' ? otraZona : zona,
+                lat: selectedLat || (ZONAS_COORDS[zona]?.lat || null),
+                lon: selectedLon || (ZONAS_COORDS[zona]?.lon || null),
+                fecha: fecha,
+                hora: hora || 'manana',
+                especies: especies,
+                cantidad: cantidad || '0',
+                exito: cantidad && cantidad !== '0',
+                metodo: metodo || 'spinning',
+                mar: mar || 'regular',
+                temp_agua: temp || 'normal'
+            };
+
+            // Guardar en localStorage
+            let datos = JSON.parse(localStorage.getItem('encuestas_pesca') || '[]');
+            datos.push(encuesta);
+            localStorage.setItem('encuestas_pesca', JSON.stringify(datos));
+
+            // Actualizar contador
+            actualizarContador();
+
+            // Mostrar mensaje
+            document.getElementById('success').classList.remove('hidden');
+            setTimeout(() => {
+                document.getElementById('success').classList.add('hidden');
+                limpiarFormulario();
+            }, 2000);
+        }
+
+        function limpiarFormulario() {
+            document.querySelectorAll('.option.selected').forEach(o => o.classList.remove('selected'));
+            document.getElementById('otra-zona').value = '';
+            document.getElementById('otra-zona').classList.add('hidden');
+            document.getElementById('fecha').valueAsDate = new Date();
+            document.getElementById('coords').classList.add('hidden');
+            if (marker) {
+                map.removeLayer(marker);
+                marker = null;
+            }
+            selectedLat = null;
+            selectedLon = null;
+            map.setView([-17.7, -71.35], 10);
+        }
+
+        function actualizarContador() {
+            const datos = JSON.parse(localStorage.getItem('encuestas_pesca') || '[]');
+            document.getElementById('total').textContent = datos.length;
+        }
+
+        function showTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelector(`.tab:nth-child(${tab === 'encuesta' ? 1 : 2})`).classList.add('active');
+
+            document.getElementById('tab-encuesta').classList.toggle('hidden', tab !== 'encuesta');
+            document.getElementById('tab-historial').classList.toggle('hidden', tab !== 'historial');
+
+            if (tab === 'historial') {
+                mostrarHistorial();
+            }
+        }
+
+        function mostrarHistorial() {
+            const datos = JSON.parse(localStorage.getItem('encuestas_pesca') || '[]');
+            const container = document.getElementById('historial');
+
+            if (datos.length === 0) {
+                container.innerHTML = '<p style="color: #718096;">No hay encuestas guardadas</p>';
+                return;
+            }
+
+            container.innerHTML = datos.reverse().map(e => `
+                <div class="registro">
+                    <strong>${e.zona}</strong> - ${e.fecha}<br>
+                    ${e.especies.join(', ') || 'Nada'} (${e.cantidad}) | ${e.metodo}<br>
+                    <small>Mar: ${e.mar} | Agua: ${e.temp_agua}</small>
+                    ${e.lat ? `<br><small>📍 ${e.lat.toFixed(4)}, ${e.lon.toFixed(4)}</small>` : ''}
+                </div>
+            `).join('');
+        }
+
+        function exportar() {
+            const datos = JSON.parse(localStorage.getItem('encuestas_pesca') || '[]');
+            const blob = new Blob([JSON.stringify(datos, null, 2)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `encuestas_pesca_${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+        }
+
+        function copiarDatos() {
+            const datos = JSON.parse(localStorage.getItem('encuestas_pesca') || '[]');
+            navigator.clipboard.writeText(JSON.stringify(datos, null, 2))
+                .then(() => alert('✅ Datos copiados al portapapeles'))
+                .catch(() => alert('Error al copiar'));
+        }
+
+        // Inicializar
+        actualizarContador();
+    </script>
+</body>
+</html>

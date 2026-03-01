@@ -28,10 +28,12 @@ ZONAS = {
     "punta_mesa": {"lat": -17.850, "lon": -71.200, "nombre": "Punta Mesa"},
     "santa_rosa": {"lat": -17.750, "lon": -71.300, "nombre": "Santa Rosa"},
     "boca_rio": {"lat": -18.050, "lon": -70.850, "nombre": "Boca del Rio"},
+    "playa_blanca_gentillar": {"lat": -17.822, "lon": -71.140, "nombre": "Playa Blanca-Gentillar"},
+    "llostay": {"lat": -17.96, "lon": -70.88, "nombre": "Llostay"},
     "punta_picata": {"lat": -18.200, "lon": -70.900, "nombre": "Punta Picata"},
 }
 
-ESPECIES = ["cabrilla", "corvina", "robalo", "pejerrey", "lenguado", "tramboyo", "chita", "otro", "nada"]
+ESPECIES = ["cabrilla", "corvina", "robalo", "pejerrey", "lenguado", "bonito", "lorna", "chita", "tramboyo", "otro", "nada"]
 METODOS = ["spinning", "rockfishing", "carnada", "mosca", "otro"]
 HORAS = ["madrugada", "manana", "mediodia", "tarde", "noche"]
 MAR = ["calmo", "regular", "picado"]

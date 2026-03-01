@@ -171,6 +171,15 @@ SPECIES_DATABASE: Dict[str, SpeciesHabitat] = {
         color=(105, 105, 105),  # Gris oscuro
         icon='🦈'
     ),
+    'bonito': SpeciesHabitat(
+        name='Eastern Pacific Bonito',
+        name_es='Bonito',
+        preferred_substrates={SubstrateType.SAND, SubstrateType.MIXED},
+        depth_range=(5, 80),
+        optimal_depth=25,
+        color=(0, 139, 139),  # Teal oscuro
+        icon='🐟'
+    ),
 }
 
 

@@ -135,6 +135,12 @@ SPECIES: FrozenSet[Species] = frozenset({
         substrate=(Substrate.SAND, Substrate.MIXED),
         recommended_lures="Cucharillas pequenas"
     ),
+    Species(
+        name="Bonito",
+        temp_min=17.0, temp_max=23.0,
+        substrate=(Substrate.SAND, Substrate.MIXED),
+        recommended_lures="Jigs metalicos 40-60g, poppers, cucharas"
+    ),
 })
 
 # Quick lookup by name
@@ -176,12 +182,14 @@ HOTSPOTS: Tuple[FishingLocation, ...] = (
     FishingLocation("Fundicion", -17.757, -71.233, Substrate.ROCK, 1.2, "Rocas grandes, estructura compleja"),
     FishingLocation("Pozo Redondo", -17.782, -71.189, Substrate.MIXED, 1.25, "Pozas naturales entre rocas"),
     FishingLocation("Punta Blanca", -17.812, -71.168, Substrate.ROCK, 1.3, "Punta rocosa, buena para robalo"),
+    FishingLocation("Playa Blanca-Gentillar", -17.822, -71.140, Substrate.SAND, 1.30, "Playa abierta, corvina con dron 300m. Validado feb-2026: 140kg en 2 dias"),
     FishingLocation("Gentillar", -17.842, -71.113, Substrate.ROCK, 1.15, "Costa rocosa escarpada"),
     # Ite
     FishingLocation("Ite Sur", -17.872, -71.081, Substrate.ROCK, 1.2, "Formaciones rocosas, cabrilla"),
     FishingLocation("Ite Centro", -17.902, -70.998, Substrate.MIXED, 1.15, "Zona mixta productiva"),
     FishingLocation("Ite Norte", -17.932, -70.938, Substrate.SAND, 1.2, "Playa amplia, surgencia activa"),
     FishingLocation("Carlepe", -17.962, -70.905, Substrate.MIXED, 1.1, "Rocas y arena alternadas"),
+    FishingLocation("Llostay", -17.96, -70.88, Substrate.ROCK, 1.2, "Chita y lorna, spinning. Validado feb-2026"),
     FishingLocation("Punta Mesa", -17.988, -70.889, Substrate.ROCK, 1.15, "Punta rocosa con pozas"),
     # Tacna
     FishingLocation("Vila Vila", -18.018, -70.876, Substrate.ROCK, 1.25, "Zona rocosa, buena estructura"),

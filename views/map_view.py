@@ -56,6 +56,9 @@ class MapView:
         """Initialize the map."""
         folium_map = self._map_component.create(center, zoom)
 
+        # Inject base CSS so panels render with proper background/borders/z-index
+        folium_map.get_root().html.add_child(folium.Element(get_base_css()))
+
         # Initialize panel components
         self._timeline_panel = TimelinePanel(folium_map)
         self._hourly_panel = HourlyPanel(folium_map)
@@ -115,6 +118,22 @@ class MapView:
         """Embed multi-day hourly predictions data for dynamic date selection."""
         if self._hourly_panel:
             self._hourly_panel.render_multiday(multiday_data)
+
+    def add_multiday_spots(self, multiday_predictions: list):
+        """Embed multi-day top spots data as JS variable for day selector marker updates."""
+        if not self.map or not multiday_predictions:
+            return
+        import json
+        js_data = {}
+        for day in multiday_predictions:
+            date_str = day.get('date', '')
+            js_data[date_str] = day.get('top_spots', [])
+        html = f'''
+        <script>
+            const multidaySpotsData = {json.dumps(js_data)};
+        </script>
+        '''
+        self.map.get_root().html.add_child(folium.Element(html))
 
     def add_hourly_spots_data(self, hourly_spots_data: Dict[int, List[Dict]]):
         """Embed 24-hour unified scoring data for dynamic marker updates."""

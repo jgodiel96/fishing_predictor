@@ -24,10 +24,10 @@ COLORS = {
         'very_hot': '#FF4500'
     },
     'flow': {
-        'slow': '#DA70D6',
-        'moderate': '#9932CC',
-        'fast': '#8B008B',
-        'very_fast': '#4B0082'
+        'slow': '#B0C4DE',
+        'moderate': '#7B9FCC',
+        'fast': '#5078AA',
+        'very_fast': '#2E5984'
     },
     'zones': {
         'high': '#00CED1',

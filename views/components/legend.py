@@ -21,7 +21,8 @@ class Legend:
         if not self.map:
             return
 
-        min_score, max_score = score_range
+        # Always use fixed 0-100 range for a useful legend
+        min_score, max_score = 0, 100
         html = self._build_html(min_score, max_score)
         self.map.get_root().html.add_child(folium.Element(html))
 

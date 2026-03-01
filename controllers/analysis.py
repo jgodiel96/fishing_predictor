@@ -1079,7 +1079,7 @@ class AnalysisController:
         try:
             print("[INFO] Generando predicciones para 7 dias...")
             multiday_data = self.generate_multiday_predictions(days=7)
-            self.map_view.add_multiday_panel(multiday_data)
+            self.map_view.add_multiday_spots(multiday_data)
             print(f"[OK] {len(multiday_data)} dias de predicciones generados")
         except Exception as e:
             print(f"[WARN] No se pudo agregar panel multi-dia: {e}")

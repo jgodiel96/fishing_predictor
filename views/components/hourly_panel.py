@@ -245,6 +245,11 @@ class HourlyPanel:
                     else if (p.total_score >= 60) scoreEl.style.color = '#ff9800';
                     else scoreEl.style.color = '#f44336';
                 }}
+
+                // Update map markers for this hour
+                if (typeof updateSpotsForHour === 'function') {{
+                    updateSpotsForHour(hour);
+                }}
             }}
 
             function showHourlyTab(tabName) {{
@@ -324,6 +329,72 @@ class HourlyPanel:
                 }});
 
                 updateHourlyPanelForDate(date);
+
+                // Update map markers with top spots for the selected day
+                if (typeof updateMarkersForDay === 'function') {{
+                    updateMarkersForDay(date);
+                }}
+            }}
+
+            function updateMarkersForDay(date) {{
+                if (typeof multidaySpotsData === 'undefined') return;
+                const spots = multidaySpotsData[date];
+                if (!spots || spots.length === 0) return;
+
+                var map = null;
+                if (typeof getLeafletMap === 'function') {{
+                    map = getLeafletMap();
+                }}
+                if (!map) return;
+
+                // Remove previous dynamic markers
+                if (typeof dynamicMarkerLayer !== 'undefined' && dynamicMarkerLayer) {{
+                    map.removeLayer(dynamicMarkerLayer);
+                }}
+
+                dynamicMarkerLayer = L.layerGroup();
+
+                spots.forEach(function(spot, idx) {{
+                    var color = (typeof getScoreColor === 'function') ? getScoreColor(spot.score) : '#32CD32';
+                    var isTop = idx < 5;
+                    var radius = isTop ? 10 : 6;
+
+                    var speciesText = '';
+                    if (spot.species && spot.species.length > 0) {{
+                        speciesText = spot.species.map(function(s) {{ return s.name || s; }}).join(', ');
+                    }}
+
+                    var circle = L.circleMarker([spot.lat, spot.lon], {{
+                        radius: radius,
+                        color: '#000',
+                        weight: isTop ? 2 : 1,
+                        fillColor: color,
+                        fillOpacity: 0.85,
+                        opacity: 0.9
+                    }});
+
+                    circle.bindTooltip(
+                        '#' + (idx+1) + ' Score: ' + spot.score.toFixed(0) + (speciesText ? ' | ' + speciesText : ''),
+                        {{permanent: false, direction: 'top'}}
+                    );
+
+                    circle.addTo(dynamicMarkerLayer);
+
+                    if (isTop) {{
+                        var labelText = '#' + (idx+1);
+                        if (speciesText) labelText += ' ' + speciesText.substring(0, 20);
+                        L.marker([spot.lat, spot.lon], {{
+                            icon: L.divIcon({{
+                                html: '<div style="font-size:11px;font-weight:bold;color:white;text-shadow:1px 1px 3px black;white-space:nowrap;">' + labelText + '</div>',
+                                iconSize: [80, 20],
+                                iconAnchor: [40, 10],
+                                className: ''
+                            }})
+                        }}).addTo(dynamicMarkerLayer);
+                    }}
+                }});
+
+                dynamicMarkerLayer.addTo(map);
             }}
 
             function updateHourlyPanelForDate(date) {{
@@ -402,6 +473,25 @@ class HourlyPanel:
         <script>
             const hourlySpotsData = {json.dumps(js_data)};
             let currentDisplayHour = 6;
+            let dynamicMarkerLayer = null;
+
+            function getLeafletMap() {{
+                // Discover the Leaflet map instance dynamically
+                for (var key in window) {{
+                    if (key.startsWith('map_') && window[key] instanceof L.Map) {{
+                        return window[key];
+                    }}
+                }}
+                // Fallback: search all window properties for L.Map instances
+                for (var key in window) {{
+                    try {{
+                        if (window[key] && window[key]._leaflet_id && window[key].getCenter) {{
+                            return window[key];
+                        }}
+                    }} catch(e) {{}}
+                }}
+                return null;
+            }}
 
             function getScoreColor(score) {{
                 if (score >= 80) return '#228B22';
@@ -413,15 +503,63 @@ class HourlyPanel:
             function updateSpotsForHour(hour) {{
                 currentDisplayHour = hour;
                 const spots = hourlySpotsData[hour.toString()];
-                if (!spots) return;
+                if (!spots || spots.length === 0) return;
 
-                const hourDisplay = document.getElementById('unified-hour-display');
-                if (hourDisplay) {{
-                    hourDisplay.textContent = String(hour).padStart(2, '0') + ':00';
+                const map = getLeafletMap();
+                if (!map) return;
+
+                // Remove previous dynamic markers
+                if (dynamicMarkerLayer) {{
+                    map.removeLayer(dynamicMarkerLayer);
                 }}
 
-                console.log('Updated spots for hour:', hour, 'Count:', spots.length);
+                dynamicMarkerLayer = L.layerGroup();
+
+                // Sort by score descending to label top spots
+                const sorted = spots.slice().sort((a, b) => b.score - a.score);
+
+                sorted.forEach(function(spot, idx) {{
+                    var color = getScoreColor(spot.score);
+                    var isTop = idx < 5;
+                    var radius = isTop ? 10 : 6;
+
+                    var circle = L.circleMarker([spot.lat, spot.lon], {{
+                        radius: radius,
+                        color: '#000',
+                        weight: isTop ? 2 : 1,
+                        fillColor: color,
+                        fillOpacity: 0.85,
+                        opacity: 0.9
+                    }});
+
+                    var tideInfo = spot.tide_phase || '';
+                    circle.bindTooltip(
+                        (isTop ? '#' + (idx+1) + ' ' : '') + 'Score: ' + spot.score.toFixed(0) + (tideInfo ? ' | ' + tideInfo : ''),
+                        {{permanent: false, direction: 'top'}}
+                    );
+
+                    circle.addTo(dynamicMarkerLayer);
+
+                    // Add rank label for top 5
+                    if (isTop) {{
+                        L.marker([spot.lat, spot.lon], {{
+                            icon: L.divIcon({{
+                                html: '<div style="font-size:12px;font-weight:bold;color:white;text-shadow:1px 1px 3px black;">#' + (idx+1) + '</div>',
+                                iconSize: [24, 24],
+                                iconAnchor: [12, 12],
+                                className: ''
+                            }})
+                        }}).addTo(dynamicMarkerLayer);
+                    }}
+                }});
+
+                dynamicMarkerLayer.addTo(map);
             }}
+
+            // Initialize dynamic markers after Leaflet loads
+            setTimeout(function() {{
+                updateSpotsForHour(6);
+            }}, 1000);
         </script>
         '''
 

@@ -163,8 +163,8 @@ class MapComponent:
             folium.PolyLine(
                 locations=line,
                 color=color,
-                weight=3,
-                opacity=0.8
+                weight=2,
+                opacity=0.5
             ).add_to(fg)
 
             self._add_flow_arrow(fg, line, color)
@@ -351,21 +351,26 @@ class MapComponent:
         folium.RegularPolygonMarker(
             location=[end_lat, end_lon],
             number_of_sides=3,
-            radius=6,
+            radius=4,
             rotation=angle - 90,
             color=color,
             fill=True,
             fillColor=color,
-            fillOpacity=0.9
+            fillOpacity=0.6
         ).add_to(fg)
 
     def _add_spot_label(self, fg: folium.FeatureGroup, spot: Dict, index: int):
+        species = spot.get('species', [])
+        species_text = ', '.join(s['name'] for s in species[:2]) if species else ''
+        label = f'#{index+1}'
+        if species_text:
+            label += f' {species_text}'
         folium.Marker(
             location=[spot['lat'], spot['lon']],
             icon=folium.DivIcon(
-                html=f'<div style="font-size:14px;font-weight:bold;color:white;text-shadow:2px 2px 4px black;">#{index+1}</div>',
-                icon_size=(30, 30),
-                icon_anchor=(15, 15)
+                html=f'<div style="font-size:12px;font-weight:bold;color:white;text-shadow:1px 1px 3px black;white-space:nowrap;">{label}</div>',
+                icon_size=(100, 20),
+                icon_anchor=(50, 10)
             )
         ).add_to(fg)
 

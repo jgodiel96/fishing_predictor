@@ -8,6 +8,27 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional
 
+# V8: High-resolution vectorized analysis
+try:
+    from scipy.interpolate import RegularGridInterpolator
+    from scipy.spatial import cKDTree
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+
+try:
+    import netCDF4
+    NETCDF4_AVAILABLE = True
+except ImportError:
+    NETCDF4_AVAILABLE = False
+
+try:
+    from core.cv_analysis.species_zones import SPECIES_DATABASE
+    from core.cv_analysis.substrate_classifier import SubstrateType
+    SPECIES_DB_AVAILABLE = True
+except ImportError:
+    SPECIES_DB_AVAILABLE = False
+
 # Import centralized configuration
 from config import LEGACY_DB, STUDY_AREA
 from domain import PERU_SOUTH_LIMIT
@@ -642,7 +663,7 @@ class AnalysisController:
         return self.pca_analysis
 
     def analyze_spots(self, target_hour: int = None) -> List[Dict]:
-        """Analyze and score fishing spots with tide, SSS, SLA integration (V4/V6).
+        """Analyze and score fishing spots - V8 vectorized (no Python loops over spots).
 
         Args:
             target_hour: Hour of day (0-23) for tide/time calculations.
@@ -651,79 +672,159 @@ class AnalysisController:
         if not self.fish_zones:
             self.generate_fish_zones()
 
+        N = len(self.sampled_spots)
+        if N == 0:
+            return self.sampled_spots
+
         # Determine target hour
         if target_hour is None:
             target_hour = self.analysis_datetime.hour
 
-        # Get environmental scores for specific hour
+        # === Pre-compute once (cached across calls) ===
+        if not hasattr(self, '_spot_coastal_distances'):
+            spot_lats, spot_lons = self._get_spot_arrays()
+            self._cached_spot_lats = spot_lats
+            self._cached_spot_lons = spot_lons
+            self._compute_coastal_distances_vectorized()
+            self._get_coastal_modifiers_vectorized()
+            self._build_spatial_scores_vectorized()
+            self._assign_depths_vectorized()
+            self._assign_substrate_vectorized()
+            self._assign_species_by_habitat()
+
+        spot_lats = self._cached_spot_lats
+        spot_lons = self._cached_spot_lons
+
+        # === Hourly scores (change each call) ===
         tide_score, tide_phase, hour_score = self._get_hourly_scores(target_hour)
+        exposure = self._compute_tidal_exposure_vectorized(target_hour)
 
-        # SSS and SLA scores (V4)
-        sss_score = self.sss_score  # Set by _fetch_physics_data
-        sla_score = self.sla_score  # Set by _fetch_physics_data
+        # === Zone scores — loop over zones (~8-20), vectorized over spots ===
+        best_scores = np.zeros(N)
+        best_dists = np.full(N, np.inf)
+        best_dirs = np.zeros(N)
 
-        for spot in self.sampled_spots:
-            best_score, best_dist, best_dir = 0, float('inf'), 0
+        # Precompute constants for haversine-like distance
+        cos_lat = np.cos(np.radians(spot_lats))
 
-            for zone in self.fish_zones:
-                dist = self._distance_m(spot['lat'], spot['lon'], zone['lat'], zone['lon'])
-                direction = self._bearing(spot['lat'], spot['lon'], zone['lat'], zone['lon'])
+        for zone in self.fish_zones:
+            z_lat, z_lon = zone['lat'], zone['lon']
 
-                # Movement factor
-                ideal = (direction + 180) % 360
-                angle_diff = abs(zone.get('movement_direction', 90) - ideal)
-                if angle_diff > 180:
-                    angle_diff = 360 - angle_diff
-                movement_factor = 1.0 + (1.0 - angle_diff / 180) * 0.4
+            # Vectorized distance (meters)
+            dlat = (spot_lats - z_lat) * 111000.0
+            dlon = (spot_lons - z_lon) * 111000.0 * cos_lat
+            dists = np.sqrt(dlat**2 + dlon**2)
 
-                # Score calculation
-                dist_score = max(0, 100 - dist / 8)
-                intensity_score = zone.get('intensity', 0.5) * 40
-                zone_score = (dist_score * 0.6 + intensity_score * 0.4) * movement_factor
+            # Vectorized bearing
+            directions = np.degrees(np.arctan2(spot_lons - z_lon, spot_lats - z_lat)) % 360
 
-                if zone_score > best_score:
-                    best_score, best_dist, best_dir = zone_score, dist, direction
+            # Movement factor
+            ideal = (directions + 180) % 360
+            move_dir = zone.get('movement_direction', 90)
+            angle_diff = np.abs(move_dir - ideal)
+            angle_diff = np.minimum(angle_diff, 360 - angle_diff)
+            movement_factor = 1.0 + (1.0 - angle_diff / 180.0) * 0.4
 
-            # Apply ML boost if available
-            ml_boost = self._get_ml_boost(spot['lat'], spot['lon'])
+            # Score calculation
+            dist_score = np.maximum(0, 100 - dists / 8.0)
+            intensity_score = zone.get('intensity', 0.5) * 40
+            zone_scores = (dist_score * 0.6 + intensity_score * 0.4) * movement_factor
 
-            # Environmental bonuses (V4/V6/V7):
-            # Tide: up to ±15 points (marea entrante/saliente = bueno)
-            tide_bonus = (tide_score - 0.5) * 30
-            # Hour: up to ±12 points (alba/ocaso = excelente)
-            hour_bonus = (hour_score - 0.5) * 24
-            # SSS: up to ±10 points (salinity optimal range)
-            sss_bonus = (sss_score - 0.5) * 20
-            # SLA: up to ±8 points (negative SLA = upwelling = good)
-            sla_bonus = (sla_score - 0.5) * 16
+            # Update best scores
+            better_mask = zone_scores > best_scores
+            best_scores = np.where(better_mask, zone_scores, best_scores)
+            best_dists = np.where(better_mask, dists, best_dists)
+            best_dirs = np.where(better_mask, directions, best_dirs)
 
-            # V7 bonuses:
-            # Chlorophyll-a: up to ±8 points (productividad primaria)
-            chla_bonus = (self.chla_score - 0.5) * 16
-            # SST Historical: up to ±6 points (anomalias termicas)
-            sst_hist_bonus = (self.sst_historical_score - 0.5) * 12
-            # GFW Hotspots: up to +10 points (proximidad a zona de pesca real)
-            gfw_bonus = self._get_gfw_bonus(spot['lat'], spot['lon'])
+        # === ML boost vectorized ===
+        ml_boosts = np.zeros(N)
+        if self.ml_predictions and SCIPY_AVAILABLE:
+            pred_lats = np.array([p.lat for p in self.ml_predictions])
+            pred_lons = np.array([p.lon for p in self.ml_predictions])
+            pred_scores = np.array([p.score for p in self.ml_predictions])
+            pred_confs = np.array([p.confidence for p in self.ml_predictions])
 
-            total_bonus = (tide_bonus + hour_bonus + sss_bonus + sla_bonus +
-                          chla_bonus + sst_hist_bonus + gfw_bonus)
+            mean_lat = np.mean(spot_lats)
+            cos_lat_pred = np.cos(np.radians(mean_lat))
+            pred_m = np.column_stack([
+                pred_lats * 111000.0,
+                pred_lons * 111000.0 * cos_lat_pred
+            ])
+            spots_m = np.column_stack([
+                spot_lats * 111000.0,
+                spot_lons * 111000.0 * cos_lat_pred
+            ])
+            pred_tree = cKDTree(pred_m)
+            p_dists, p_idx = pred_tree.query(spots_m)
 
-            spot['score'] = min(100, max(0, best_score + ml_boost + total_bonus))
-            spot['distance_to_fish'] = best_dist
-            spot['direction_to_fish'] = best_dir
+            within_5km = p_dists < 5000.0
+            proximity = np.where(within_5km, 1.0 - p_dists / 5000.0, 0.0)
+            ml_boosts = np.where(within_5km,
+                                 (pred_scores[p_idx] / 100.0) * 15 * proximity * pred_confs[p_idx],
+                                 0.0)
+
+        # === Environmental bonuses (vectorized) ===
+        env = self._per_spot_env
+        tide_bonus = (tide_score - 0.5) * 30 * self._tide_mods
+        hour_bonus = (hour_score - 0.5) * 24 * self._hour_mods
+        sss_bonus = (env.get('sss', np.full(N, self.sss_score)) - 0.5) * 20
+        sla_bonus = (env.get('sla', np.full(N, self.sla_score)) - 0.5) * 16
+        chla_bonus = (env.get('chla', np.full(N, self.chla_score)) - 0.5) * 16
+        sst_hist_bonus = (env.get('sst', np.full(N, self.sst_historical_score)) - 0.5) * 12
+
+        # GFW bonus vectorized
+        gfw_bonuses = np.zeros(N)
+        if self.dynamic_hotspots and self.gfw_generator and SCIPY_AVAILABLE:
+            try:
+                hs_lats = np.array([h['lat'] for h in self.dynamic_hotspots])
+                hs_lons = np.array([h['lon'] for h in self.dynamic_hotspots])
+                mean_lat_gfw = np.mean(spot_lats)
+                cos_lat_gfw = np.cos(np.radians(mean_lat_gfw))
+                hs_m = np.column_stack([
+                    hs_lats * 111000.0,
+                    hs_lons * 111000.0 * cos_lat_gfw
+                ])
+                spots_m_gfw = np.column_stack([
+                    spot_lats * 111000.0,
+                    spot_lons * 111000.0 * cos_lat_gfw
+                ])
+                hs_tree = cKDTree(hs_m)
+                hs_dists, _ = hs_tree.query(spots_m_gfw)
+                gfw_bonuses = np.where(hs_dists < 10000.0,
+                                       10.0 * (1.0 - hs_dists / 10000.0), 0.0)
+            except Exception:
+                pass
+
+        total_bonus = (tide_bonus + hour_bonus + sss_bonus + sla_bonus +
+                      chla_bonus + sst_hist_bonus + gfw_bonuses)
+
+        # Apply tidal exposure penalty
+        total_bonus *= exposure
+
+        # Final scores
+        final_scores = np.clip(best_scores + ml_boosts + total_bonus, 0, 100)
+
+        # === Assign back to spot dicts ===
+        sss_arr = env.get('sss', np.full(N, self.sss_score))
+        sla_arr = env.get('sla', np.full(N, self.sla_score))
+        chla_arr = env.get('chla', np.full(N, self.chla_score))
+        sst_arr = env.get('sst', np.full(N, self.sst_historical_score))
+
+        for i, spot in enumerate(self.sampled_spots):
+            spot['score'] = float(final_scores[i])
+            spot['distance_to_fish'] = float(best_dists[i])
+            spot['direction_to_fish'] = float(best_dirs[i])
             spot['tide_phase'] = tide_phase
             spot['tide_score'] = tide_score
             spot['hour_score'] = hour_score
             spot['target_hour'] = target_hour
-            spot['sss_score'] = sss_score
-            spot['sla_score'] = sla_score
-
-            # V7 fields
-            spot['chla_score'] = self.chla_score
+            spot['sss_score'] = float(sss_arr[i])
+            spot['sla_score'] = float(sla_arr[i])
+            spot['chla_score'] = float(chla_arr[i])
             spot['chla_value'] = self.chla_value
-            spot['sst_historical_score'] = self.sst_historical_score
+            spot['sst_historical_score'] = float(sst_arr[i])
             spot['sst_anomaly'] = self.sst_anomaly
-            spot['gfw_bonus'] = gfw_bonus
+            spot['gfw_bonus'] = float(gfw_bonuses[i])
 
         self.sampled_spots.sort(key=lambda s: s['score'], reverse=True)
         return self.sampled_spots
@@ -861,23 +962,37 @@ class AnalysisController:
         return tide_score, tide_phase, hour_score
 
     def analyze_spots_all_hours(self) -> Dict[int, List[Dict]]:
-        """Pre-calculate scores for all 24 hours (V6).
+        """Pre-calculate scores for all 24 hours (V8 - top-200 per hour to save memory).
 
         Returns:
-            Dict mapping hour (0-23) to list of spots with scores
+            Dict mapping hour (0-23) to list of top-200 spots with scores
         """
         all_hours_data = {}
+        TOP_N = 200  # V8: only keep top-200 per hour (not all 11,200)
 
-        print("[INFO] Pre-calculando scores para 24 horas...")
+        # Build index mapping: we need to track original indices since
+        # analyze_spots sorts in-place
+        N = len(self.sampled_spots)
+
+        # Create a stable ID mapping before sorting
+        for i, spot in enumerate(self.sampled_spots):
+            spot['_orig_idx'] = i
+
+        print("[INFO] Pre-calculando scores para 24 horas (V8 vectorizado)...")
+        # Track best score per original index across all hours
+        best_score_per_spot = np.zeros(N)
+        best_hour_per_spot = np.zeros(N, dtype=int)
+
         for hour in range(24):
-            # Reset spots to original state
+            # Reset scores
             for spot in self.sampled_spots:
                 spot.pop('score', None)
 
-            # Calculate scores for this hour
+            # Vectorized scoring for this hour
             spots_for_hour = self.analyze_spots(target_hour=hour)
 
-            # Deep copy the results
+            # Keep only top-200 for storage
+            top_spots = spots_for_hour[:TOP_N]
             all_hours_data[hour] = [
                 {
                     'lat': s['lat'],
@@ -887,22 +1002,28 @@ class AnalysisController:
                     'tide_score': s.get('tide_score', 0.5),
                     'hour_score': s.get('hour_score', 0.5),
                     'substrate': s.get('substrate', 'unknown'),
+                    'depth_m': s.get('depth_m', -10.0),
                     'species': s.get('species', [])
                 }
-                for s in spots_for_hour
+                for s in top_spots
             ]
 
-        # Find best hour for each spot
-        for spot_idx in range(len(self.sampled_spots)):
-            best_hour = max(range(24), key=lambda h: all_hours_data[h][spot_idx]['score'])
-            best_score = all_hours_data[best_hour][spot_idx]['score']
+            # Track best hour for each spot
+            for s in spots_for_hour:
+                idx = s.get('_orig_idx', 0)
+                if idx < N and s['score'] > best_score_per_spot[idx]:
+                    best_score_per_spot[idx] = s['score']
+                    best_hour_per_spot[idx] = hour
 
-            # Store in original spot data
-            if spot_idx < len(self.sampled_spots):
-                self.sampled_spots[spot_idx]['best_hour'] = best_hour
-                self.sampled_spots[spot_idx]['best_score'] = best_score
+        # Store best hour/score in original spots
+        for i, spot in enumerate(self.sampled_spots):
+            orig_idx = spot.get('_orig_idx', i)
+            if orig_idx < N:
+                spot['best_hour'] = int(best_hour_per_spot[orig_idx])
+                spot['best_score'] = float(best_score_per_spot[orig_idx])
+            spot.pop('_orig_idx', None)  # Clean up temp field
 
-        print(f"[OK] Scores calculados para 24 horas, {len(self.sampled_spots)} spots")
+        print(f"[OK] Scores calculados para 24 horas, top-{TOP_N} por hora, {N} spots total")
         return all_hours_data
 
     def _fetch_physics_data(self, lat: float, lon: float) -> Dict:
@@ -1168,7 +1289,7 @@ class AnalysisController:
         analysis_date_str = self.analysis_datetime.strftime('%Y-%m-%d')
 
         print("=" * 60)
-        print("   ANALISIS DE PESCA CON ML")
+        print("   ANALISIS DE PESCA CON ML (V8 - Alta Resolucion)")
         print("=" * 60)
         print(f"Fecha: {self.analysis_datetime.strftime('%d/%m/%Y %H:%M')}\n")
 
@@ -1179,9 +1300,8 @@ class AnalysisController:
 
         # 2. Sample spots with focus on key areas
         print("\n[2/8] Muestreando puntos de pesca...")
-        # Base sampling along entire coast - high density for full coverage
-        # 281km coast / 300m spacing = ~937 spots, limited to 600
-        spots = self.sample_fishing_spots(spacing_m=300, max_spots=600)
+        # V8: High-resolution sampling - 25m spacing for ~11,200 spots
+        spots = self.sample_fishing_spots(spacing_m=25, max_spots=15000)
         print(f"      {len(spots)} spots muestreados")
 
         # 3. Generate fish zones
@@ -1209,12 +1329,20 @@ class AnalysisController:
         print("\n[7/8] Ejecutando prediccion ML con 32 features...")
         pca_results = self.run_ml_prediction()
 
-        # 8. Analyze spots (current hour)
-        print("\n[8/8] Analizando spots...")
+        # 8. Analyze spots (current hour) — V8: vectorized with GEBCO depth + substrate
+        print("\n[8/8] Analizando spots (V8 vectorizado)...")
         results = self.analyze_spots()
 
-        # 8b. Pre-calculate scores for all 24 hours (V6 - unified scoring)
-        print("\n[8b] Pre-calculando scores para 24 horas (scoring unificado)...")
+        # V8 stats
+        if hasattr(self, '_spot_depths'):
+            n_with_depth = np.sum(~np.isnan(self._spot_depths))
+            print(f"      V8: {n_with_depth} spots con profundidad GEBCO")
+        if hasattr(self, '_spot_substrates_str'):
+            unique_subs = np.unique(self._spot_substrates_str)
+            print(f"      V8: {len(unique_subs)} tipos de sustrato: {', '.join(unique_subs)}")
+
+        # 8b. Pre-calculate scores for all 24 hours (V8 - vectorized, top-200 per hour)
+        print("\n[8b] Pre-calculando scores para 24 horas (V8 vectorizado)...")
         self.hourly_spots_data = self.analyze_spots_all_hours()
 
         weather = conditions.get('weather', {})
@@ -1473,6 +1601,323 @@ class AnalysisController:
             {'name': s, 'lure': self.SPECIES_LURES.get(s, '')}
             for s in self.SPECIES_BY_SUBSTRATE.get(substrate, [])[:3]
         ]
+
+    # ================================================================
+    # V8: Vectorized high-resolution methods
+    # ================================================================
+
+    def _get_spot_arrays(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Return (lats, lons) arrays for all sampled spots."""
+        lats = np.array([s['lat'] for s in self.sampled_spots])
+        lons = np.array([s['lon'] for s in self.sampled_spots])
+        return lats, lons
+
+    @staticmethod
+    def _classify_depth_zone(depths: np.ndarray) -> List[str]:
+        """Classify depth values into zone strings (vectorized)."""
+        zones = np.where(depths > 0, 'intertidal',
+                 np.where(depths > -5, 'shallow',
+                 np.where(depths > -20, 'nearshore',
+                 np.where(depths > -50, 'offshore', 'deep'))))
+        return zones.tolist()
+
+    def _assign_depths_vectorized(self):
+        """Assign GEBCO depth to every spot in a single interpolation call."""
+        if not SCIPY_AVAILABLE or not NETCDF4_AVAILABLE:
+            print("[WARN] scipy/netCDF4 no disponible, profundidades por defecto")
+            for s in self.sampled_spots:
+                s['depth_m'] = -10.0
+                s['depth_zone'] = 'nearshore'
+            self._spot_depths = np.full(len(self.sampled_spots), -10.0)
+            return
+
+        gebco_path = Path(__file__).parent.parent / 'data' / 'bathymetry' / 'GEBCO_2025_peru.nc'
+        if not gebco_path.exists():
+            print(f"[WARN] GEBCO no encontrado: {gebco_path}, profundidades por defecto")
+            for s in self.sampled_spots:
+                s['depth_m'] = -10.0
+                s['depth_zone'] = 'nearshore'
+            self._spot_depths = np.full(len(self.sampled_spots), -10.0)
+            return
+
+        try:
+            ds = netCDF4.Dataset(str(gebco_path), 'r')
+            lats_grid = ds.variables['lat'][:]
+            lons_grid = ds.variables['lon'][:]
+            elevation = ds.variables['elevation'][:]
+            ds.close()
+
+            interpolator = RegularGridInterpolator(
+                (lats_grid, lons_grid), elevation,
+                method='linear', bounds_error=False, fill_value=np.nan
+            )
+
+            spot_lats, spot_lons = self._get_spot_arrays()
+            points = np.column_stack([spot_lats, spot_lons])
+            depths = interpolator(points)
+
+            # Replace NaN with default
+            depths = np.where(np.isnan(depths), -10.0, depths)
+            self._spot_depths = depths
+
+            zones = self._classify_depth_zone(depths)
+            for i, s in enumerate(self.sampled_spots):
+                s['depth_m'] = float(depths[i])
+                s['depth_zone'] = zones[i]
+
+            n_valid = np.sum(~np.isnan(depths))
+            print(f"      GEBCO: {n_valid} spots con profundidad (rango: {depths.min():.1f}m a {depths.max():.1f}m)")
+
+        except Exception as e:
+            print(f"[WARN] Error cargando GEBCO: {e}")
+            for s in self.sampled_spots:
+                s['depth_m'] = -10.0
+                s['depth_zone'] = 'nearshore'
+            self._spot_depths = np.full(len(self.sampled_spots), -10.0)
+
+    def _compute_coastal_distances_vectorized(self):
+        """Compute distance from each spot to nearest coastline point using cKDTree."""
+        if not SCIPY_AVAILABLE or not self.coastline_points:
+            self._spot_coastal_distances = np.full(len(self.sampled_spots), 500.0)
+            return
+
+        spot_lats, spot_lons = self._get_spot_arrays()
+        coast_arr = np.array(self.coastline_points)  # (M, 2) of (lat, lon)
+
+        # Project to meters using cos(lat) approximation
+        mean_lat = np.mean(spot_lats)
+        cos_lat = np.cos(np.radians(mean_lat))
+
+        coast_m = np.column_stack([
+            coast_arr[:, 0] * 111000.0,
+            coast_arr[:, 1] * 111000.0 * cos_lat
+        ])
+        spots_m = np.column_stack([
+            spot_lats * 111000.0,
+            spot_lons * 111000.0 * cos_lat
+        ])
+
+        tree = cKDTree(coast_m)
+        dists, _ = tree.query(spots_m)
+        self._spot_coastal_distances = dists  # meters
+
+    def _assign_substrate_vectorized(self):
+        """Assign substrate to each spot based on coastal distance + ground truth override."""
+        N = len(self.sampled_spots)
+        dists = self._spot_coastal_distances
+
+        # Base model: distance-based
+        # <100m → rock, 100-500m → mixed, >500m → sand
+        substrates = np.where(dists < 100, 'rock',
+                     np.where(dists < 500, 'mixed', 'sand'))
+
+        # Override with ground truth from encuestas
+        encuestas_path = Path(__file__).parent.parent / 'data' / 'encuestas_pesca.json'
+        if encuestas_path.exists() and SCIPY_AVAILABLE:
+            try:
+                with open(encuestas_path, 'r') as f:
+                    enc_data = json.load(f)
+
+                encuestas = enc_data.get('encuestas', [])
+                if encuestas:
+                    # Map Spanish substrate names to internal names
+                    sustrato_map = {
+                        'arena': 'sand', 'roca': 'rock', 'mixto': 'mixed',
+                        'sand': 'sand', 'rock': 'rock', 'mixed': 'mixed'
+                    }
+
+                    enc_points = []
+                    enc_substrates = []
+                    for enc in encuestas:
+                        if 'lat' in enc and 'lon' in enc:
+                            raw_sub = enc.get('sustrato', '')
+                            mapped = sustrato_map.get(raw_sub, '')
+                            if mapped:
+                                enc_points.append([enc['lat'], enc['lon']])
+                                enc_substrates.append(mapped)
+
+                    if enc_points:
+                        mean_lat = np.mean([p[0] for p in enc_points])
+                        cos_lat = np.cos(np.radians(mean_lat))
+                        enc_arr = np.array(enc_points)
+                        enc_m = np.column_stack([
+                            enc_arr[:, 0] * 111000.0,
+                            enc_arr[:, 1] * 111000.0 * cos_lat
+                        ])
+
+                        spot_lats, spot_lons = self._get_spot_arrays()
+                        spots_m = np.column_stack([
+                            spot_lats * 111000.0,
+                            spot_lons * 111000.0 * cos_lat
+                        ])
+
+                        enc_tree = cKDTree(enc_m)
+                        enc_dists, enc_idx = enc_tree.query(spots_m)
+
+                        # Override spots within 500m of a survey point
+                        override_mask = enc_dists < 500.0
+                        for i in np.where(override_mask)[0]:
+                            substrates[i] = enc_substrates[enc_idx[i]]
+
+                        n_overrides = np.sum(override_mask)
+                        if n_overrides > 0:
+                            print(f"      Sustrato: {n_overrides} spots con ground truth de encuestas")
+
+            except Exception as e:
+                print(f"[WARN] Error cargando encuestas para sustrato: {e}")
+
+        # Store as SubstrateType enum if available, else string
+        self._spot_substrates_str = substrates  # string array for fast lookup
+        for i, s in enumerate(self.sampled_spots):
+            s['substrate'] = substrates[i]
+
+        # Count
+        n_rock = np.sum(substrates == 'rock')
+        n_sand = np.sum(substrates == 'sand')
+        n_mixed = np.sum(substrates == 'mixed')
+        print(f"      Sustrato: {n_rock} roca, {n_sand} arena, {n_mixed} mixto")
+
+    def _assign_species_by_habitat(self):
+        """Assign top-3 species per spot based on SPECIES_DATABASE affinities."""
+        if not SPECIES_DB_AVAILABLE:
+            # Fallback to old lat-based method
+            return
+
+        N = len(self.sampled_spots)
+        depths = self._spot_depths
+        substrates_str = self._spot_substrates_str
+
+        # Map string substrates to SubstrateType enum
+        str_to_enum = {
+            'rock': SubstrateType.ROCK,
+            'sand': SubstrateType.SAND,
+            'mixed': SubstrateType.MIXED,
+            'unknown': SubstrateType.UNKNOWN,
+        }
+
+        # Build affinity matrix: iterate over species (10), not spots (11,200)
+        species_list = list(SPECIES_DATABASE.items())  # [(key, SpeciesHabitat), ...]
+        n_species = len(species_list)
+        affinity_matrix = np.zeros((n_species, N))
+
+        for sp_idx, (sp_key, sp_hab) in enumerate(species_list):
+            # Vectorized: compute depth score for all spots at once
+            abs_depths = np.abs(depths)
+            min_d, max_d = sp_hab.depth_range
+            opt_d = sp_hab.optimal_depth
+            range_size = max(max_d - min_d, 1.0)
+
+            # In-range depth score
+            distance_to_opt = np.abs(abs_depths - opt_d)
+            in_range_score = 1.0 - (distance_to_opt / range_size) * 0.5
+
+            # Out-of-range scores
+            below_score = np.maximum(0, 1.0 - (min_d - abs_depths) / 10.0)
+            above_score = np.maximum(0, 1.0 - (abs_depths - max_d) / 20.0)
+
+            in_range_mask = (abs_depths >= min_d) & (abs_depths <= max_d)
+            below_mask = abs_depths < min_d
+            depth_score = np.where(in_range_mask, in_range_score,
+                          np.where(below_mask, below_score, above_score))
+
+            # Substrate score: vectorized using np.where chains
+            is_preferred = np.zeros(N, dtype=bool)
+            for pref_sub in sp_hab.preferred_substrates:
+                is_preferred |= (substrates_str == pref_sub.value)
+            is_mixed = (substrates_str == 'mixed')
+
+            substrate_score = np.where(is_preferred, 1.0,
+                             np.where(is_mixed, 0.6, 0.2))
+
+            affinity_matrix[sp_idx] = substrate_score * 0.5 + depth_score * 0.5
+
+        # For each spot, get top-3 species by affinity
+        # argsort along axis=0 (species axis) for each spot
+        top3_indices = np.argsort(-affinity_matrix, axis=0)[:3]  # (3, N)
+
+        for i, s in enumerate(self.sampled_spots):
+            species_info = []
+            for rank in range(3):
+                sp_idx = top3_indices[rank, i]
+                sp_key, sp_hab = species_list[sp_idx]
+                species_info.append({
+                    'name': sp_hab.name_es,
+                    'lure': self.SPECIES_LURES.get(sp_hab.name_es, ''),
+                    'affinity': float(affinity_matrix[sp_idx, i])
+                })
+            s['species'] = species_info
+
+    def _compute_tidal_exposure_vectorized(self, hour: int) -> np.ndarray:
+        """Compute tidal exposure factor for all spots at given hour."""
+        N = len(self.sampled_spots)
+        depths = self._spot_depths
+
+        # Get tide height for the hour
+        tide_height = 0.0
+        if TIDES_AVAILABLE and self.tide_fetcher:
+            try:
+                target_dt = self.analysis_datetime.replace(hour=hour, minute=0, second=0)
+                center_lat = np.mean([p[0] for p in self.coastline_points])
+                center_lon = np.mean([p[1] for p in self.coastline_points])
+                tide_height = self.tide_fetcher._calculate_tide_height(
+                    target_dt, center_lat, center_lon
+                )
+            except Exception:
+                tide_height = 0.0
+
+        # effective_depth = bathymetric_depth + tide_height
+        # depths are negative (underwater), tide_height positive = higher water
+        effective_depth = depths + tide_height
+
+        # Exposure factor:
+        # < -2m: 1.0 (fully submerged, good)
+        # -2m to 0m: gradual (intertidal zone)
+        # > 0m: penalized (exposed)
+        exposure = np.where(effective_depth < -2.0, 1.0,
+                   np.where(effective_depth < 0.0,
+                            0.5 + 0.5 * (-effective_depth / 2.0),  # 0.5 to 1.0
+                            np.maximum(0.1, 0.5 - 0.4 * (effective_depth / 2.0))))
+
+        return exposure
+
+    def _get_coastal_modifiers_vectorized(self):
+        """Compute tide and hour modifiers based on coastal distance."""
+        dists = self._spot_coastal_distances
+        normalized = np.minimum(1.0, dists / 20000.0)
+
+        # Closer to coast → stronger tide/hour effects
+        self._tide_mods = 1.0 - 0.6 * normalized
+        self._hour_mods = 1.0 - 0.5 * normalized
+
+    def _build_spatial_scores_vectorized(self):
+        """Build per-spot environmental scores where grid data is available."""
+        N = len(self.sampled_spots)
+        self._per_spot_env = {}
+
+        # For now, the fetchers return scalar values for a single point.
+        # Future: if fetcher exposes grid data, interpolate per-spot.
+        # Currently we broadcast the scalar to all spots with slight spatial variation
+        # based on coastal distance to add geographic differentiation.
+
+        dists = self._spot_coastal_distances
+        # Normalize distance: 0 = coast, 1 = 20km offshore
+        norm_dist = np.minimum(1.0, dists / 20000.0)
+
+        # SSS: salinity increases offshore
+        base_sss = self.sss_score
+        self._per_spot_env['sss'] = base_sss + (norm_dist - 0.5) * 0.1
+
+        # SLA: sea level anomaly more pronounced offshore
+        base_sla = self.sla_score
+        self._per_spot_env['sla'] = base_sla + (norm_dist - 0.5) * 0.08
+
+        # Chla: higher near coast (upwelling)
+        base_chla = self.chla_score
+        self._per_spot_env['chla'] = base_chla + (0.5 - norm_dist) * 0.12
+
+        # SST: slight gradient
+        base_sst = self.sst_historical_score
+        self._per_spot_env['sst'] = base_sst + (norm_dist - 0.5) * 0.05
 
     def _get_ml_boost(self, lat: float, lon: float) -> float:
         """Get ML score boost for a location."""

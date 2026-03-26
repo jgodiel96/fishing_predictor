@@ -2,29 +2,23 @@
 Map legend component.
 """
 
-import folium
 from typing import Tuple
 
 from views.styles.map_styles import COLORS
 
 
 class Legend:
-    """
-    Legend component for the fishing map.
-    """
+    """Legend component for the fishing map."""
 
-    def __init__(self, map_obj: folium.Map):
-        self.map = map_obj
+    def __init__(self, map_obj=None):
+        self._html = ''
 
     def render(self, score_range: Tuple[float, float] = (0, 100)):
-        """Add legend to map."""
-        if not self.map:
-            return
-
-        # Always use fixed 0-100 range for a useful legend
         min_score, max_score = 0, 100
-        html = self._build_html(min_score, max_score)
-        self.map.get_root().html.add_child(folium.Element(html))
+        self._html = self._build_html(min_score, max_score)
+
+    def get_html(self) -> str:
+        return self._html
 
     def _build_html(self, min_score: float, max_score: float) -> str:
         return f'''
@@ -33,12 +27,12 @@ class Legend:
                     box-shadow:0 2px 8px rgba(0,0,0,0.4);font-size:10px;
                     font-family:Arial;max-height:90vh;overflow-y:auto;width:180px;">
             <b style="font-size:13px;">Predictor de Pesca</b><br>
-            <small style="color:#666;">ML + Mareas + Hora</small>
+            <small style="color:#666;">deck.gl + ML + Mareas</small>
 
             <hr style="margin:5px 0;border-color:#ddd;">
             <b>Score (Heatmap):</b><br>
             <div style="width:100%;height:15px;border-radius:3px;margin:5px 0;
-                        background:linear-gradient(to right, #0000ff, #00ffff, #00ff00, #ffff00, #ff8000, #ff0000);">
+                        background:linear-gradient(to right, #1a0530, #3b0764, #dc2626, #f97316, #eab308, #84cc16, #22c55e);">
             </div>
             <div style="display:flex;justify-content:space-between;font-size:9px;">
                 <span>{min_score:.0f}</span>
@@ -57,9 +51,9 @@ class Legend:
 
             <hr style="margin:5px 0;border-color:#ddd;">
             <b>SST:</b><br>
-            <span style="color:#1E90FF;">◆</span> Frio |
-            <span style="color:#00FF00;">◆</span> Optimo |
-            <span style="color:#FF4500;">◆</span> Caliente<br>
+            <span style="color:#1E90FF;">●</span> Frio |
+            <span style="color:#00FF00;">●</span> Optimo |
+            <span style="color:#FF4500;">●</span> Caliente<br>
 
             <hr style="margin:5px 0;border-color:#ddd;">
             <b>Corrientes:</b><br>

@@ -4,37 +4,32 @@ Shows monthly stats, weekly forecast, and yearly trends.
 """
 
 import json
-import folium
 from typing import Dict, List
 
-from views.styles.map_styles import COLORS, get_chart_js_cdn
+from views.styles.map_styles import COLORS
 
 
 class TimelinePanel:
-    """
-    Timeline panel with charts and date selection.
-    """
+    """Timeline panel with charts and date selection."""
 
-    def __init__(self, map_obj: folium.Map):
-        self.map = map_obj
+    def __init__(self, map_obj=None):
+        self._html = ''
 
     def render(self, timeline_data: Dict):
-        """Add timeline controls, charts, and forecast panel to map."""
-        if not self.map or not timeline_data:
+        if not timeline_data:
             return
+        self._html = self._build_html(timeline_data)
 
-        html = self._build_html(timeline_data)
-        self.map.get_root().html.add_child(folium.Element(html))
+    def get_html(self) -> str:
+        return self._html
 
     def _build_html(self, data: Dict) -> str:
-        """Build the complete timeline UI with charts and controls."""
         monthly = data.get('monthly_stats', [])
         forecast = data.get('weekly_forecast', [])
         today_stats = data.get('today_stats', {})
         date_range = data.get('date_range', {})
         yearly = data.get('yearly_trend', [])
 
-        # Prepare chart data
         months_labels = json.dumps([m['month_name'][:3] for m in monthly])
         fishing_rates = json.dumps([round(m['fishing_rate'], 1) for m in monthly])
         sst_values = json.dumps([round(m['avg_sst'], 1) for m in monthly])
@@ -43,14 +38,11 @@ class TimelinePanel:
         forecast_probs = json.dumps([round(f['fishing_probability'], 1) for f in forecast])
         forecast_sst = json.dumps([round(f['predicted_sst'], 1) for f in forecast])
 
-        # Today's conditions
         today_sst = today_stats.get('avg_sst', 'N/A') if today_stats else 'N/A'
         today_wave = today_stats.get('avg_wave', 'N/A') if today_stats else 'N/A'
         today_rate = today_stats.get('fishing_rate', 0) if today_stats else 0
 
         return f'''
-        {get_chart_js_cdn()}
-
         <div id="timeline-panel" class="fishing-panel" style="
             position: fixed;
             top: 10px;
@@ -119,7 +111,8 @@ class TimelinePanel:
 
             <div style="margin-top:12px;padding-top:10px;border-top:1px solid #eee;">
                 <label style="display:flex;align-items:center;cursor:pointer;">
-                    <input type="checkbox" id="heatmap-toggle" onchange="toggleHeatmap(this.checked)" style="margin-right:8px;">
+                    <input type="checkbox" id="heatmap-toggle"
+                        onchange="toggleLayer('historical', this.checked)" style="margin-right:8px;">
                     <span style="font-size:12px;">Mostrar heatmap historico</span>
                 </label>
             </div>
@@ -242,16 +235,12 @@ class TimelinePanel:
             }}
 
             function onDateChange(date) {{
-                console.log('Selected date:', date);
                 if (typeof multidayHourlyData !== 'undefined' && multidayHourlyData[date]) {{
-                    updateHourlyPanelForDate(date);
+                    if (typeof selectMultiday === 'function') selectMultiday(date);
+                    else updateHourlyPanelForDate(date);
                 }} else {{
                     alert('Fecha seleccionada: ' + date + '\\nEjecuta: python main.py --date ' + date);
                 }}
-            }}
-
-            function toggleHeatmap(show) {{
-                console.log('Heatmap toggle:', show);
             }}
         </script>
         '''

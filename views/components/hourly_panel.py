@@ -4,46 +4,36 @@ Shows tide chart, hour slider, and best hours.
 """
 
 import json
-import folium
 from typing import Dict, List
 
 from views.styles.map_styles import COLORS
 
 
 class HourlyPanel:
-    """
-    Hourly predictions panel with tide charts and hour selection.
-    """
+    """Hourly predictions panel with tide charts and hour selection."""
 
-    def __init__(self, map_obj: folium.Map):
-        self.map = map_obj
+    def __init__(self, map_obj=None):
+        self._html_parts: List[str] = []
 
     def render(self, hourly_data: Dict):
-        """Add hourly predictions panel to map."""
-        if not self.map or not hourly_data:
+        if not hourly_data:
             return
-
-        html = self._build_html(hourly_data)
-        self.map.get_root().html.add_child(folium.Element(html))
+        self._html_parts.append(self._build_html(hourly_data))
 
     def render_multiday(self, multiday_data: Dict):
-        """Embed multi-day hourly predictions for dynamic date selection."""
-        if not self.map or not multiday_data:
+        if not multiday_data:
             return
-
-        html = self._build_multiday_html(multiday_data)
-        self.map.get_root().html.add_child(folium.Element(html))
+        self._html_parts.append(self._build_multiday_html(multiday_data))
 
     def render_hourly_spots(self, hourly_spots_data: Dict[int, List[Dict]]):
-        """Embed 24-hour scoring data for dynamic marker updates."""
-        if not self.map or not hourly_spots_data:
+        if not hourly_spots_data:
             return
+        self._html_parts.append(self._build_hourly_spots_html(hourly_spots_data))
 
-        html = self._build_hourly_spots_html(hourly_spots_data)
-        self.map.get_root().html.add_child(folium.Element(html))
+    def get_html(self) -> str:
+        return '\n'.join(self._html_parts)
 
     def _build_html(self, hourly_data: Dict) -> str:
-        """Build hourly panel HTML."""
         predictions = hourly_data.get('predictions', [])
         tide_extremes = hourly_data.get('tide_extremes', [])
         best_hours = hourly_data.get('best_hours', [])
@@ -246,7 +236,7 @@ class HourlyPanel:
                     else scoreEl.style.color = '#f44336';
                 }}
 
-                // Update map markers for this hour
+                // Update deck.gl layers for this hour
                 if (typeof updateSpotsForHour === 'function') {{
                     updateSpotsForHour(hour);
                 }}
@@ -274,7 +264,6 @@ class HourlyPanel:
         '''
 
     def _build_multiday_html(self, multiday_data: Dict) -> str:
-        """Build multiday selector HTML."""
         days_data = multiday_data.get('days', {})
         location = multiday_data.get('location', {})
 
@@ -330,71 +319,9 @@ class HourlyPanel:
 
                 updateHourlyPanelForDate(date);
 
-                // Update map markers with top spots for the selected day
                 if (typeof updateMarkersForDay === 'function') {{
                     updateMarkersForDay(date);
                 }}
-            }}
-
-            function updateMarkersForDay(date) {{
-                if (typeof multidaySpotsData === 'undefined') return;
-                const spots = multidaySpotsData[date];
-                if (!spots || spots.length === 0) return;
-
-                var map = null;
-                if (typeof getLeafletMap === 'function') {{
-                    map = getLeafletMap();
-                }}
-                if (!map) return;
-
-                // Remove previous dynamic markers
-                if (typeof dynamicMarkerLayer !== 'undefined' && dynamicMarkerLayer) {{
-                    map.removeLayer(dynamicMarkerLayer);
-                }}
-
-                dynamicMarkerLayer = L.layerGroup();
-
-                spots.forEach(function(spot, idx) {{
-                    var color = (typeof getScoreColor === 'function') ? getScoreColor(spot.score) : '#32CD32';
-                    var isTop = idx < 5;
-                    var radius = isTop ? 10 : 6;
-
-                    var speciesText = '';
-                    if (spot.species && spot.species.length > 0) {{
-                        speciesText = spot.species.map(function(s) {{ return s.name || s; }}).join(', ');
-                    }}
-
-                    var circle = L.circleMarker([spot.lat, spot.lon], {{
-                        radius: radius,
-                        color: '#000',
-                        weight: isTop ? 2 : 1,
-                        fillColor: color,
-                        fillOpacity: 0.85,
-                        opacity: 0.9
-                    }});
-
-                    circle.bindTooltip(
-                        '#' + (idx+1) + ' Score: ' + spot.score.toFixed(0) + (speciesText ? ' | ' + speciesText : ''),
-                        {{permanent: false, direction: 'top'}}
-                    );
-
-                    circle.addTo(dynamicMarkerLayer);
-
-                    if (isTop) {{
-                        var labelText = '#' + (idx+1);
-                        if (speciesText) labelText += ' ' + speciesText.substring(0, 20);
-                        L.marker([spot.lat, spot.lon], {{
-                            icon: L.divIcon({{
-                                html: '<div style="font-size:11px;font-weight:bold;color:white;text-shadow:1px 1px 3px black;white-space:nowrap;">' + labelText + '</div>',
-                                iconSize: [80, 20],
-                                iconAnchor: [40, 10],
-                                className: ''
-                            }})
-                        }}).addTo(dynamicMarkerLayer);
-                    }}
-                }});
-
-                dynamicMarkerLayer.addTo(map);
             }}
 
             function updateHourlyPanelForDate(date) {{
@@ -454,7 +381,6 @@ class HourlyPanel:
         '''
 
     def _build_hourly_spots_html(self, hourly_spots_data: Dict[int, List[Dict]]) -> str:
-        """Build hourly spots JavaScript for dynamic updates."""
         js_data = {}
         for hour, spots in hourly_spots_data.items():
             js_data[str(hour)] = [
@@ -472,121 +398,13 @@ class HourlyPanel:
         return f'''
         <script>
             const hourlySpotsData = {json.dumps(js_data)};
-            let currentDisplayHour = 6;
-            let dynamicHeatLayer = null;
-            let dynamicMarkerLayer = null;
 
-            function getLeafletMap() {{
-                for (var key in window) {{
-                    if (key.startsWith('map_') && window[key] instanceof L.Map) {{
-                        return window[key];
-                    }}
-                }}
-                for (var key in window) {{
-                    try {{
-                        if (window[key] && window[key]._leaflet_id && window[key].getCenter) {{
-                            return window[key];
-                        }}
-                    }} catch(e) {{}}
-                }}
-                return null;
-            }}
-
-            function getScoreColor(score) {{
-                if (score >= 80) return '#228B22';
-                if (score >= 60) return '#32CD32';
-                if (score >= 40) return '#FFD700';
-                return '#DC143C';
-            }}
-
-            function updateSpotsForHour(hour) {{
-                currentDisplayHour = hour;
-                const spots = hourlySpotsData[hour.toString()];
-                if (!spots || spots.length === 0) return;
-
-                const map = getLeafletMap();
-                if (!map) return;
-
-                // Remove previous layers
-                if (dynamicHeatLayer) {{
-                    map.removeLayer(dynamicHeatLayer);
-                }}
-                if (dynamicMarkerLayer) {{
-                    map.removeLayer(dynamicMarkerLayer);
-                }}
-
-                // Sort by score descending
-                const sorted = spots.slice().sort((a, b) => b.score - a.score);
-
-                // Find score range for normalization
-                var maxS = sorted[0].score || 1;
-                var minS = sorted[sorted.length - 1].score || 0;
-                var range = Math.max(maxS - minS, 1);
-
-                // === Heatmap layer for all spots (canvas, fast) ===
-                var heatData = sorted.map(function(s) {{
-                    return [s.lat, s.lon, Math.max(0.01, (s.score - minS) / range)];
-                }});
-
-                if (typeof L.heatLayer === 'function') {{
-                    dynamicHeatLayer = L.heatLayer(heatData, {{
-                        radius: 8,
-                        blur: 12,
-                        maxZoom: 18,
-                        minOpacity: 0.35,
-                        gradient: {{
-                            0.0: '#1a0530',
-                            0.2: '#3b0764',
-                            0.35: '#dc2626',
-                            0.5: '#f97316',
-                            0.65: '#eab308',
-                            0.8: '#84cc16',
-                            1.0: '#22c55e'
-                        }}
-                    }});
-                    dynamicHeatLayer.addTo(map);
-                }}
-
-                // === Top-5 markers (interactive, with labels) ===
-                dynamicMarkerLayer = L.layerGroup();
-
-                sorted.slice(0, 5).forEach(function(spot, idx) {{
-                    var color = getScoreColor(spot.score);
-
-                    var circle = L.circleMarker([spot.lat, spot.lon], {{
-                        radius: idx === 0 ? 12 : 9,
-                        color: '#000',
-                        weight: 2,
-                        fillColor: color,
-                        fillOpacity: 0.9,
-                        opacity: 0.9
-                    }});
-
-                    var tideInfo = spot.tide_phase || '';
-                    circle.bindTooltip(
-                        '#' + (idx+1) + ' Score: ' + spot.score.toFixed(0) + (tideInfo ? ' | ' + tideInfo : ''),
-                        {{permanent: false, direction: 'top'}}
-                    );
-
-                    circle.addTo(dynamicMarkerLayer);
-
-                    L.marker([spot.lat, spot.lon], {{
-                        icon: L.divIcon({{
-                            html: '<div style="font-size:12px;font-weight:bold;color:white;text-shadow:1px 1px 3px black;">#' + (idx+1) + '</div>',
-                            iconSize: [24, 24],
-                            iconAnchor: [12, 12],
-                            className: ''
-                        }})
-                    }}).addTo(dynamicMarkerLayer);
-                }});
-
-                dynamicMarkerLayer.addTo(map);
-            }}
-
-            // Initialize after Leaflet loads
+            // Initialize hourly spots after map loads
             setTimeout(function() {{
-                updateSpotsForHour(6);
-            }}, 1000);
+                if (typeof updateSpotsForHour === 'function') {{
+                    updateSpotsForHour(6);
+                }}
+            }}, 1500);
         </script>
         '''
 

@@ -2,7 +2,14 @@
 
 Sistema avanzado de prediccion de puntos optimos de pesca desde orilla para la costa sur de Peru (Tacna - Ilo).
 
-**Fecha de actualizacion:** 2026-02-13
+**Fecha de actualizacion:** 2026-03-26
+
+## Mapa Interactivo
+
+[![Ver Mapa de Pesca](https://img.shields.io/badge/Ver_Mapa-Prediccion_de_Pesca-0d47a1?style=for-the-badge&logo=google-maps&logoColor=white)](https://jgodiel96.github.io/fishing_predictor/)
+
+> Abre el mapa interactivo desde cualquier dispositivo (PC, tablet o celular).
+> Incluye prediccion horaria, mareas, pronostico de 7 dias y 224k+ spots analizados con ML.
 
 ## Diagrama de Arquitectura del Sistema
 

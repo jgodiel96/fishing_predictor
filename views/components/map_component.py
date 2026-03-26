@@ -39,7 +39,8 @@ class MapComponent:
         center = center or self.config.center
         zoom = zoom or self.config.zoom
 
-        self.map = folium.Map(location=list(center), zoom_start=zoom, tiles=None)
+        self.map = folium.Map(location=list(center), zoom_start=zoom, tiles=None,
+                              prefer_canvas=True)
 
         # Satellite layer
         folium.TileLayer(
@@ -201,7 +202,11 @@ class MapComponent:
         fg.add_to(self.map)
 
     def add_fishing_spots(self, spots: List[Dict], top_n: int = 5):
-        """Add fishing spot markers with heatmap colors based on scores."""
+        """Add fishing spots — heatmap for all + markers for top spots.
+
+        For large datasets (>1000 spots), uses canvas HeatMap for the full
+        demographic view and only renders top-N as interactive markers.
+        """
         if not self.map or not spots:
             return
 
@@ -210,9 +215,50 @@ class MapComponent:
         max_score = max(scores) if scores else 100
         self._spot_score_range = (min_score, max_score)
 
-        fg = folium.FeatureGroup(name="Puntos de Pesca")
+        N = len(spots)
+        use_heatmap = N > 1000
 
-        for i, spot in enumerate(spots):
+        if use_heatmap:
+            # === Score heatmap layer (canvas) ===
+            # Subsample to ~15k points max — at 5m spacing, neighbors have
+            # nearly identical scores, so stride doesn't lose visual fidelity.
+            MAX_HEAT_PTS = 15000
+            stride = max(1, N // MAX_HEAT_PTS)
+            score_range = max(max_score - min_score, 1)
+            heat_data = [
+                [spots[i]['lat'], spots[i]['lon'],
+                 max(0.01, (spots[i]['score'] - min_score) / score_range)]
+                for i in range(0, N, stride)
+                if spots[i]['score'] > 0
+            ]
+
+            if heat_data:
+                # Adjust radius based on point density
+                heat_radius = max(6, min(18, int(stride * 1.5)))
+                fg_heat = folium.FeatureGroup(name="Mapa de Scores", show=True)
+                HeatMap(
+                    heat_data,
+                    min_opacity=0.35,
+                    max_zoom=15,
+                    radius=heat_radius,
+                    blur=heat_radius + 4,
+                    gradient={
+                        0.0: '#1a0530',
+                        0.2: '#3b0764',
+                        0.35: '#dc2626',
+                        0.5: '#f97316',
+                        0.65: '#eab308',
+                        0.8: '#84cc16',
+                        1.0: '#22c55e'
+                    }
+                ).add_to(fg_heat)
+                fg_heat.add_to(self.map)
+
+        # === Top-N interactive markers (always rendered) ===
+        top_count = min(top_n * 4, 20) if use_heatmap else N  # top-20 for large sets
+        fg = folium.FeatureGroup(name="Top Spots")
+
+        for i, spot in enumerate(spots[:top_count]):
             is_best = (i == 0)
             is_top = (i < top_n)
 

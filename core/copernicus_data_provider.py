@@ -94,8 +94,20 @@ class CopernicusDataProvider:
         if sst_df is None:
             return []
 
-        # Filtrar por fecha
-        sst_day = sst_df[sst_df['date'] == date] if 'date' in sst_df.columns else sst_df
+        # Filtrar por fecha (con fallback a fecha mas reciente si no hay datos hoy)
+        if 'date' in sst_df.columns:
+            sst_day = sst_df[sst_df['date'] == date]
+            if sst_day.empty:
+                # Buscar fecha mas reciente disponible (hasta 3 dias atras)
+                available = sorted(sst_df['date'].unique(), reverse=True)
+                for fallback_date in available[:3]:
+                    sst_day = sst_df[sst_df['date'] == fallback_date]
+                    if not sst_day.empty:
+                        print(f"[INFO] Copernicus: usando datos de {fallback_date} (ultimo disponible)")
+                        date = fallback_date
+                        break
+        else:
+            sst_day = sst_df
 
         points = []
         for _, row in sst_day.iterrows():

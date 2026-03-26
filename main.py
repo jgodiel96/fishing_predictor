@@ -5,17 +5,14 @@ Fishing Predictor - Main Entry Point (MVC Architecture)
 Usage:
     python main.py                              # Run full analysis for today
     python main.py --date 2025-01-15            # Run analysis for specific date
-    python main.py --copernicus                 # Use Copernicus data (better quality)
-    python main.py --date 2025-01-15 --copernicus  # Historical analysis with Copernicus
     python main.py --lat -17.8 --lon -71.2      # Search near location (default 10km)
     python main.py --lat -17.8 --lon -71.2 --radius 5  # Search within 5km
     python main.py --test                       # Run tests
     python main.py --help                       # Show help
 
-Data Sources:
-    - Open-Meteo (default): Real-time data, fast but less accurate
-    - Copernicus (--copernicus): Downloaded historical data, higher quality
-      Requires: data/raw/sst/, data/raw/currents/, data/raw/waves/
+Data Source:
+    Copernicus Marine Service (pre-downloaded parquet files)
+    Requires: data/raw/sst/, data/raw/currents/, data/raw/waves/
 """
 
 import sys
@@ -177,12 +174,6 @@ def main():
         default=10.0,
         help='Search radius in km (default: 10)'
     )
-    parser.add_argument(
-        '--copernicus',
-        action='store_true',
-        help='Use Copernicus data (requires downloaded data, use --date for historical)'
-    )
-
     args = parser.parse_args()
 
     if args.test:

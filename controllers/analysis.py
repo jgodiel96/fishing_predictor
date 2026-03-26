@@ -234,18 +234,22 @@ class AnalysisController:
 
         return len(self.coastline_points)
 
-    def sample_fishing_spots(self, num_spots: int = None, spacing_m: int = 750, max_spots: int = 200) -> List[Dict]:
+    def sample_fishing_spots(self, num_spots: int = None, spacing_m: int = 750,
+                             max_spots: int = 200,
+                             offshore_distances: List[float] = None) -> List[Dict]:
         """
         Sample spots along the coastline with specified spacing.
 
-        Samples from each coastline segment separately to maintain geographic
-        continuity and avoid creating connections between distant segments.
+        V8: supports 2D sampling with offshore_distances to create a grid
+        extending perpendicular into the ocean. Uses polyline interpolation
+        for sub-vertex resolution (e.g. 5m spacing on ~97m vertex spacing).
 
         Args:
             num_spots: Fixed number of spots (if provided, overrides spacing)
             spacing_m: Target spacing between spots in meters (default: 750m)
-                      Use 500-1000m for high-resolution analysis
-            max_spots: Maximum number of spots to sample (default: 200)
+            max_spots: Maximum number of coastline points (total = this × bands)
+            offshore_distances: List of offshore distances in meters.
+                              If None, only samples on the coastline (band 0).
 
         Returns:
             List of sampled fishing spots
@@ -253,7 +257,9 @@ class AnalysisController:
         if not self.coastline_points:
             return []
 
-        # Use segments if available, otherwise treat all points as one segment
+        if offshore_distances is None:
+            offshore_distances = [0]
+
         segments = getattr(self, 'coastline_segments', None)
         if not segments or len(segments) == 0:
             segments = [self.coastline_points]
@@ -263,24 +269,23 @@ class AnalysisController:
         for segment in segments:
             seg_length = 0
             for i in range(1, len(segment)):
-                p1 = segment[i-1]
-                p2 = segment[i]
-                dist = self._distance_m(p1[0], p1[1], p2[0], p2[1])
-                # Only count connections < 10km (ignore gaps within segment)
-                if dist < 10000:
-                    seg_length += dist
+                d = self._distance_m(segment[i-1][0], segment[i-1][1],
+                                     segment[i][0], segment[i][1])
+                if d < 10000:
+                    seg_length += d
             segment_lengths.append(seg_length)
 
         total_length_m = sum(segment_lengths)
 
-        # Calculate number of spots based on spacing
         if num_spots is None:
             num_spots = max(10, min(max_spots, int(total_length_m / spacing_m)))
 
+        n_bands = len(offshore_distances)
         actual_spacing = total_length_m / num_spots if num_spots > 0 else spacing_m
-        print(f"[INFO] Costa: {total_length_m/1000:.1f}km ({len(segments)} segmentos), espaciado: {actual_spacing:.0f}m, spots: {num_spots}")
+        total_expected = num_spots * n_bands
+        print(f"[INFO] Costa: {total_length_m/1000:.1f}km ({len(segments)} segmentos), "
+              f"espaciado: {actual_spacing:.0f}m, {num_spots} pts x {n_bands} bandas = ~{total_expected} spots")
 
-        # Distribute spots proportionally to each segment's length
         self.sampled_spots = []
         spot_id = 1
 
@@ -288,36 +293,89 @@ class AnalysisController:
             if seg_length == 0 or len(segment) < 2:
                 continue
 
-            # Calculate spots for this segment proportionally
             seg_spots = max(1, int(num_spots * (seg_length / total_length_m)))
 
-            # Sample points within this segment
-            if len(segment) <= seg_spots:
-                seg_indices = range(len(segment))
-            else:
-                seg_indices = np.linspace(0, len(segment) - 1, seg_spots, dtype=int)
+            # ── Polyline interpolation for true sub-vertex resolution ──
+            # Build cumulative distance array along segment edges
+            seg_arr = np.array(segment)  # (V, 2) lat,lon
+            V = len(seg_arr)
+            edge_dists = np.zeros(V)
+            for i in range(1, V):
+                d = self._distance_m(seg_arr[i-1, 0], seg_arr[i-1, 1],
+                                     seg_arr[i, 0], seg_arr[i, 1])
+                edge_dists[i] = edge_dists[i-1] + (d if d < 10000 else 0)
 
-            for local_idx in seg_indices:
-                lat, lon = segment[local_idx]
+            total_seg = edge_dists[-1]
+            if total_seg == 0:
+                continue
 
-                # Filter: only include spots within STUDY_AREA
-                if not STUDY_AREA.contains(lat, lon):
-                    continue
+            # Evenly spaced target distances along the polyline
+            target_dists = np.linspace(0, total_seg, seg_spots)
 
-                bearing = self._perpendicular_to_sea_segment(segment, local_idx)
+            # For each target distance, find the edge and interpolate lat/lon
+            # Use searchsorted for vectorized edge lookup
+            edge_indices = np.searchsorted(edge_dists, target_dists, side='right') - 1
+            edge_indices = np.clip(edge_indices, 0, V - 2)
 
-                self.sampled_spots.append({
-                    'id': spot_id,
-                    'lat': lat,
-                    'lon': lon,
-                    'bearing_to_sea': bearing,
-                    'score': 0,
-                    'distance_to_fish': 0,
-                    'direction_to_fish': 0,
-                    'species': self._get_species(lat),
-                    'segment': seg_idx
-                })
-                spot_id += 1
+            # Interpolation fraction along each edge
+            edge_starts = edge_dists[edge_indices]
+            edge_ends = edge_dists[edge_indices + 1]
+            edge_lens = edge_ends - edge_starts
+            fracs = np.where(edge_lens > 0,
+                             (target_dists - edge_starts) / edge_lens, 0.0)
+            fracs = np.clip(fracs, 0.0, 1.0)
+
+            # Interpolated lat/lon
+            lat0 = seg_arr[edge_indices, 0]
+            lon0 = seg_arr[edge_indices, 1]
+            lat1 = seg_arr[edge_indices + 1, 0]
+            lon1 = seg_arr[edge_indices + 1, 1]
+            interp_lats = lat0 + fracs * (lat1 - lat0)
+            interp_lons = lon0 + fracs * (lon1 - lon0)
+
+            # Bearing: use neighbors ±1 in interpolated array for smooth perpendicular
+            # (vectorized bearing calculation)
+            prev_idx = np.clip(np.arange(seg_spots) - 1, 0, seg_spots - 1)
+            next_idx = np.clip(np.arange(seg_spots) + 1, 0, seg_spots - 1)
+            dlat = interp_lats[next_idx] - interp_lats[prev_idx]
+            dlon = interp_lons[next_idx] - interp_lons[prev_idx]
+            coast_bearings = np.degrees(np.arctan2(dlon, dlat)) % 360
+
+            # Two perpendicular candidates
+            perp1 = (coast_bearings + 90) % 360
+            perp2 = (coast_bearings - 90) % 360
+            # Pick the one going west (towards ocean in Peru south coast)
+            rad1 = np.radians(90 - perp1)
+            dx1 = np.cos(rad1)
+            bearings = np.where(dx1 < 0, perp1, perp2)
+
+            # ── Generate spots at each offshore band (vectorized per band) ──
+            for off_m in offshore_distances:
+                if off_m == 0:
+                    s_lats = interp_lats
+                    s_lons = interp_lons
+                else:
+                    rad_b = np.radians(bearings)
+                    s_lats = interp_lats + (off_m / 111000.0) * np.cos(rad_b)
+                    s_lons = interp_lons + (off_m / 111000.0) * np.sin(rad_b) / np.cos(np.radians(interp_lats))
+
+                # Filter to STUDY_AREA and build spots
+                for j in range(seg_spots):
+                    if not STUDY_AREA.contains(s_lats[j], s_lons[j]):
+                        continue
+                    self.sampled_spots.append({
+                        'id': spot_id,
+                        'lat': float(s_lats[j]),
+                        'lon': float(s_lons[j]),
+                        'bearing_to_sea': float(bearings[j]),
+                        'offshore_m': off_m,
+                        'score': 0,
+                        'distance_to_fish': 0,
+                        'direction_to_fish': 0,
+                        'species': self._get_species(float(interp_lats[j])),
+                        'segment': seg_idx
+                    })
+                    spot_id += 1
 
         return self.sampled_spots
 
@@ -401,75 +459,24 @@ class AnalysisController:
         return new_spots
 
     def fetch_marine_data(self) -> int:
-        """Fetch marine data and generate flow lines following coast contour.
+        """Fetch marine data from Copernicus and generate flow lines.
 
-        Priority:
-        1. Copernicus data (if available for analysis date)
-        2. Open-Meteo API (fallback for real-time)
-
-        Samples from each coastline segment separately to ensure correct
-        perpendicular bearings (no cross-segment calculations).
+        Uses Copernicus Marine Service as the sole data source.
+        Requires pre-downloaded parquet files in data/raw/.
         """
-        # Try Copernicus data first (better quality)
-        if COPERNICUS_DATA_AVAILABLE and self.copernicus_provider:
-            analysis_date = self.analysis_datetime.strftime('%Y-%m-%d')
-            copernicus_points = self._fetch_copernicus_marine_data(analysis_date)
-            if copernicus_points:
-                return len(self.current_vectors)
-
-        # Fallback to Open-Meteo sampling
-        print("[INFO] Generando muestreo paralelo a la costa (Open-Meteo)...")
-
-        # Use segments if available
-        segments = getattr(self, 'coastline_segments', None)
-        if not segments or len(segments) == 0:
-            segments = [self.coastline_points]
-
-        # Sample ~25 points total, distributed across segments by length
-        target_samples = 25
-        offshore_km = [3, 8, 15, 25]
-        sample_points = []
-
-        # Calculate total coastline length
-        segment_lengths = []
-        for segment in segments:
-            seg_len = 0
-            for i in range(1, len(segment)):
-                seg_len += self._distance_m(segment[i-1][0], segment[i-1][1],
-                                           segment[i][0], segment[i][1])
-            segment_lengths.append(seg_len)
-
-        total_length = sum(segment_lengths)
-        if total_length == 0:
+        if not (COPERNICUS_DATA_AVAILABLE and self.copernicus_provider):
+            print("[ERROR] CopernicusDataProvider no disponible.")
+            print("        Ejecutar: python scripts/download_incremental.py --source copernicus_sst --start YYYY-MM --end YYYY-MM")
             return 0
 
-        # Sample from each segment proportionally
-        for seg_idx, (segment, seg_len) in enumerate(zip(segments, segment_lengths)):
-            if len(segment) < 3 or seg_len < 1000:  # Skip very short segments
-                continue
+        analysis_date = self.analysis_datetime.strftime('%Y-%m-%d')
+        copernicus_points = self._fetch_copernicus_marine_data(analysis_date)
+        if not copernicus_points:
+            print("[ERROR] No hay datos de Copernicus para esta fecha.")
+            print("        Descargar datos con: python scripts/download_incremental.py --source copernicus_sst")
+            print("        O usar una fecha con datos disponibles: python main.py --date YYYY-MM-DD")
+            return 0
 
-            # Number of samples for this segment
-            seg_samples = max(1, int(target_samples * (seg_len / total_length)))
-            step = max(1, len(segment) // seg_samples)
-
-            for local_idx in range(0, len(segment), step):
-                lat, lon = segment[local_idx]
-                bearing = self._perpendicular_to_sea_segment(segment, local_idx)
-
-                for dist in offshore_km:
-                    rad = np.radians(bearing)
-                    new_lat = lat + dist / 111.0 * np.cos(rad)
-                    new_lon = lon + dist / 111.0 * np.sin(rad) / np.cos(np.radians(lat))
-                    sample_points.append((new_lat, new_lon))
-
-        print(f"[INFO] Muestreando {len(sample_points)} puntos desde {len(segments)} segmentos...")
-
-        self.marine_fetcher = MarineDataFetcher()
-        self.current_vectors = self.marine_fetcher.fetch_current_vectors(sample_points)
-        self.flow_lines = self.marine_fetcher.get_flow_lines(num_steps=5, step_km=4.0)
-        self.marine_points = self.marine_fetcher.sampled_points
-
-        print(f"[OK] {len(self.current_vectors)} vectores, {len(self.flow_lines)} lineas de flujo")
         return len(self.current_vectors)
 
     def _fetch_copernicus_marine_data(self, date: str) -> bool:
@@ -489,14 +496,15 @@ class AnalysisController:
         ocean_points = self.copernicus_provider.get_data_for_date(date)
 
         if not ocean_points:
-            print("[WARN] No hay datos de Copernicus, usando Open-Meteo...")
             return False
 
         # Get statistics
         stats = self.copernicus_provider.get_statistics(date)
         print(f"      SST: {stats['sst']['count']} pts ({stats['sst']['min']:.1f}°C - {stats['sst']['max']:.1f}°C)")
-        print(f"      Corrientes: {stats['currents']['count']} pts (media: {stats['currents']['mean_speed']:.3f} m/s)")
-        print(f"      Olas: {stats['waves']['count']} pts (altura media: {stats['waves']['mean_height']:.2f} m)")
+        curr_speed = stats['currents']['mean_speed']
+        print(f"      Corrientes: {stats['currents']['count']} pts" + (f" (media: {curr_speed:.3f} m/s)" if curr_speed else ""))
+        wave_h = stats['waves']['mean_height']
+        print(f"      Olas: {stats['waves']['count']} pts" + (f" (altura media: {wave_h:.2f} m)" if wave_h else ""))
 
         # Convert to MarinePoint format
         self.marine_points = []
@@ -1300,8 +1308,12 @@ class AnalysisController:
 
         # 2. Sample spots with focus on key areas
         print("\n[2/8] Muestreando puntos de pesca...")
-        # V8: High-resolution sampling - 25m spacing for ~11,200 spots
-        spots = self.sample_fishing_spots(spacing_m=25, max_spots=15000)
+        # V8: 2D sampling — 5m interpolated + offshore bands
+        # 281km / 5m = ~56,200 pts × 4 bands = ~224,800 spots
+        spots = self.sample_fishing_spots(
+            spacing_m=5, max_spots=60000,
+            offshore_distances=[0, 50, 150, 300]
+        )
         print(f"      {len(spots)} spots muestreados")
 
         # 3. Generate fish zones
@@ -1702,14 +1714,16 @@ class AnalysisController:
         self._spot_coastal_distances = dists  # meters
 
     def _assign_substrate_vectorized(self):
-        """Assign substrate to each spot based on coastal distance + ground truth override."""
+        """Assign substrate based on GEBCO depth (Option A) + ground truth override."""
         N = len(self.sampled_spots)
-        dists = self._spot_coastal_distances
+        depths = self._spot_depths
 
-        # Base model: distance-based
-        # <100m → rock, 100-500m → mixed, >500m → sand
-        substrates = np.where(dists < 100, 'rock',
-                     np.where(dists < 500, 'mixed', 'sand'))
+        # Base model: depth-based (GEBCO)
+        # depth > 0m    → intertidal/rock (above water or very shallow)
+        # -5m to 0m     → mixed (shallow zone, rompiente)
+        # depth < -5m   → sand (deeper, flat bottom)
+        substrates = np.where(depths > 0, 'rock',
+                     np.where(depths > -5, 'mixed', 'sand'))
 
         # Override with ground truth from encuestas
         encuestas_path = Path(__file__).parent.parent / 'data' / 'encuestas_pesca.json'

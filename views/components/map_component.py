@@ -350,17 +350,21 @@ let currentHourlySpots = null;
 function buildLayers() {{
     const layers = [];
 
-    // Score heatmap
+    // Score heatmap — normalize radiusPixels to iPad-like viewport (1080px)
     if (layerVis.heatmap && SPOTS_DATA.length > 0) {{
         const heatSrc = currentHourlySpots || SPOTS_DATA;
+        const baseRadius = 25;
+        const refWidth = 1080;
+        const adjRadius = Math.round(baseRadius * refWidth / Math.max(window.innerWidth, 600));
         layers.push(new deck.HeatmapLayer({{
             id: 'score-heatmap',
             data: heatSrc,
             getPosition: d => d.position,
             getWeight: d => d.weight,
-            radiusPixels: 25,
+            radiusPixels: adjRadius,
             intensity: 1.2,
             threshold: 0.05,
+            weightsTextureSize: 1024,
             colorRange: [
                 [26,5,48], [59,7,100], [220,38,38],
                 [249,115,22], [234,179,8], [132,204,22], [34,197,94]

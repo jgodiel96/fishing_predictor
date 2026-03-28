@@ -21,11 +21,18 @@
 | Búsqueda por proximidad | ✅ | 100% |
 | **Selector de fecha dinámico (7 días)** | ✅ | 100% |
 | **Score Unificado V6 (ML + Mareas + Hora)** | ✅ | 100% |
+| **Clorofila-a** | ✅ | 100% |
+| **SST Histórico** | ✅ | 100% |
+| **GFW Hotspots Dinámicos** | ✅ | 100% |
+| **Migración deck.gl (GPU)** | ✅ | 100% |
+| **Copernicus única fuente** | ✅ | 100% |
+| **Mapa web (GitHub Pages)** | ✅ | 100% |
 | **Sistema de validación CPUE** | ❌ | 0% |
 | **API REST** | ❌ | 0% |
-| **Clorofila-a** | ❌ | 0% |
 
-**Completitud general: ~91%**
+**Completitud general: ~95%**
+
+> **Actualización 2026-03-28:** Clorofila-a, SST histórico y GFW hotspots dinámicos están integrados en el scoring. Visualización migrada de Folium a deck.gl + MapLibre GL JS. Open-Meteo eliminado como fallback, Copernicus es la única fuente de datos marinos.
 
 ---
 

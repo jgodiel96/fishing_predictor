@@ -1,16 +1,22 @@
 # Plan V8: Mapa de Alta Resolución con Sustrato, Batimetría y Scores Geográficos
 
+**Estado:** ✅ IMPLEMENTADO (superó objetivos originales)
+
 ## Contexto
-El mapa actual tiene 606 spots a ~469m de espaciado, sin info de sustrato ni profundidad. Todos los spots reciben los mismos bonuses ambientales. Se necesita:
-1. Resolución de 25m (toda la costa, ~11,200 spots)
-2. Tipo de sustrato per-spot (roca, arena, mixto)
-3. Profundidad per-spot (batimetría GEBCO)
-4. Modelo de zona intermareal (exposición con marea)
-5. Scores ambientales que varíen geográficamente
+El mapa original tenía 606 spots a ~469m de espaciado, sin info de sustrato ni profundidad.
+
+## Resultado Implementado (2026-03-26)
+1. ~~Resolución de 25m (~11,200 spots)~~ → **Resolución de 5m con 4 bandas offshore (224,800 spots)**
+2. ✅ Tipo de sustrato per-spot (roca, arena, mixto) — basado en GEBCO + encuestas
+3. ✅ Profundidad per-spot (batimetría GEBCO via RegularGridInterpolator)
+4. ✅ Scores pre-calculados para 24 horas (top-200 por hora)
+5. ✅ Visualización migrada a deck.gl (GPU WebGL) para soportar 224k spots
+
+> **Nota:** El plan original especificaba 11,200 spots con 25m spacing. La implementación final usa 5m spacing con 4 bandas offshore (0m, 50m, 150m, 300m), generando ~224,800 spots — 20x más que lo planeado. deck.gl maneja esto sin problemas gracias al rendering GPU.
 
 ## Principio de Diseño: Todo Vectorizado con numpy/scipy
 
-**CERO loops de Python sobre 11,200 spots.** Toda operación pesada usa:
+**CERO loops de Python sobre 224,800 spots.** Toda operación pesada usa:
 - `numpy` broadcasting y operaciones vectorizadas
 - `scipy.interpolate.RegularGridInterpolator` para grillas
 - `scipy.spatial.cKDTree` para búsquedas de distancia eficientes

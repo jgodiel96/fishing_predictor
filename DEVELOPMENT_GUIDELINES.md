@@ -29,7 +29,7 @@ fishing_predictor/
 
 **Reglas:**
 - **Models**: Solo logica de negocio. Sin I/O directo.
-- **Views**: Solo renderizado. Sin logica de negocio.
+- **Views**: Solo renderizado (deck.gl + MapLibre GL JS). Sin logica de negocio.
 - **Controllers**: Orquestacion. Minima logica.
 - **Core**: Servicios reutilizables (fetchers, parsers).
 - **Data**: Gestion de capas Bronze/Silver/Gold.
@@ -257,7 +257,7 @@ def fetch_real_sst():
 
 1. **Global Fishing Watch** - Actividad pesquera real (API)
 2. **Copernicus Marine** - SST satelital (API)
-3. **Open-Meteo ERA5** - Condiciones marinas (API)
+3. **Open-Meteo ERA5** - Datos historicos de entrenamiento (no se usa en analisis activo)
 4. **IMARPE** - Datos historicos verificados (climatologia)
 
 ### 4.3 Descargas Incrementales
@@ -511,4 +511,4 @@ python -m pytest tests/ -v
 ---
 
 *Lineamientos establecidos: 2026-01-30*
-*Ultima actualizacion: 2026-02-03*
+*Ultima actualizacion: 2026-03-28*

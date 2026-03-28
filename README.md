@@ -17,13 +17,13 @@ Sistema avanzado de prediccion de puntos optimos de pesca desde orilla para la c
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                           FUENTES DE DATOS EXTERNAS                              │
 ├─────────────────────┬─────────────────────┬─────────────────────┬───────────────┤
-│   COPERNICUS        │    OPEN-METEO       │  GLOBAL FISHING     │   IMARPE      │
-│   Marine Service    │    ERA5 API         │  WATCH (GFW)        │   Historico   │
+│   COPERNICUS        │  GLOBAL FISHING     │   IMARPE            │               │
+│   Marine Service    │  WATCH (GFW)        │   Historico         │               │
 ├─────────────────────┼─────────────────────┼─────────────────────┼───────────────┤
-│ • SST (OSTIA)       │ • Olas (altura,     │ • Actividad AIS     │ • Hotspots    │
-│ • Corrientes (uo,vo)│   periodo, dir)     │ • Horas de pesca    │ • Zonas       │
-│ • Olas (VHM0,VTPK)  │ • Viento (u,v)      │ • Tipo de pesca     │   verificadas │
-│ • Clorofila-a       │ • SST alternativa   │                     │               │
+│ • SST (OSTIA)       │ • Actividad AIS     │ • Hotspots          │               │
+│ • Corrientes (uo,vo)│ • Horas de pesca    │ • Zonas             │               │
+│ • Olas (VHM0,VTPK)  │ • Tipo de pesca     │   verificadas       │               │
+│ • Clorofila-a       │                     │                     │               │
 └──────────┬──────────┴──────────┬──────────┴──────────┬──────────┴───────────────┘
            │                     │                     │
            ▼                     ▼                     ▼
@@ -110,7 +110,7 @@ Sistema avanzado de prediccion de puntos optimos de pesca desde orilla para la c
 │   │ AnalysisController                                                        │ │
 │   │ • run_full_analysis()                                                     │ │
 │   │   1. Cargar linea costera (OSM)                                           │ │
-│   │   2. Fetch datos marinos (Copernicus/Open-Meteo)                          │ │
+│   │   2. Fetch datos marinos (Copernicus)                                     │ │
 │   │   3. Detectar frentes termicos                                            │ │
 │   │   4. Extraer 32 features                                                  │ │
 │   │   5. Entrenar/Predecir con ML                                             │ │
@@ -125,11 +125,11 @@ Sistema avanzado de prediccion de puntos optimos de pesca desde orilla para la c
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │   views/map_view.py                                                              │
 │   ┌───────────────────────────────────────────────────────────────────────────┐ │
-│   │ MapGenerator (Folium)                                                     │ │
-│   │ • Capa base: OpenStreetMap / CartoDB                                      │ │
-│   │ • Capa SST: Heatmap de temperatura                                        │ │
-│   │ • Capa Corrientes: Vectores de flujo                                      │ │
-│   │ • Capa Pesca: Marcadores con score/cluster                                │ │
+│   │ MapView (deck.gl + MapLibre GL JS)                                        │ │
+│   │ • Rendering GPU (WebGL) - 224k+ spots sin lag                             │ │
+│   │ • Capa Scores: HeatmapLayer con gradiente de color                        │ │
+│   │ • Capa Corrientes: PathLayer vectores de flujo                            │ │
+│   │ • Capa Pesca: ScatterplotLayer + TextLayer top spots                      │ │
 │   │ • Capa Proximidad: Circulo de busqueda + ubicacion usuario                │ │
 │   └───────────────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────┬──────────────────────────────────────────┘
@@ -210,10 +210,11 @@ Sistema avanzado de prediccion de puntos optimos de pesca desde orilla para la c
 - **Vista dual**: Muestra tanto spots cercanos como mejores spots globales
 - **Visualizacion en mapa**: Marcador de ubicacion y circulo de radio de busqueda
 
-### Visualizacion
+### Visualizacion (deck.gl + MapLibre GL JS)
+- **Rendering GPU (WebGL)**: 224k+ spots renderizados sin lag
 - **Linea costera real**: 7,741 puntos de OpenStreetMap (coastline v8)
-- **Mapas interactivos**: Folium con capas de SST, corrientes y zonas de pesca
-- **Vectores de corriente**: Visualizacion de flujo oceanico
+- **Mapas interactivos**: deck.gl con capas de scores, corrientes y zonas de pesca
+- **Acceso web**: Mapa disponible en https://jgodiel96.github.io/fishing_predictor/
 
 ## Estructura del Proyecto
 
@@ -221,7 +222,7 @@ Sistema avanzado de prediccion de puntos optimos de pesca desde orilla para la c
 fishing_predictor/
 ├── domain.py                  # Constantes de dominio centralizadas
 ├── config.py                  # Configuracion del sistema
-├── main.py                    # Punto de entrada principal (--copernicus flag)
+├── main.py                    # Punto de entrada principal
 ├── environment.yml            # Entorno conda
 │
 ├── data/
@@ -265,7 +266,7 @@ fishing_predictor/
 │   └── analysis.py            # Controlador principal (Copernicus + fallback)
 │
 ├── views/
-│   └── map_view.py            # Generador de mapas Folium
+│   └── map_view.py            # Coordinador de mapas (deck.gl + MapLibre)
 │
 ├── core/
 │   ├── copernicus_data_provider.py  # Proveedor unificado de datos Copernicus
@@ -343,20 +344,10 @@ python scripts/validate_data.py --all
 
 ## Uso
 
-### Analisis Rapido (Open-Meteo - tiempo real)
+### Analisis completo (Copernicus Marine)
 
 ```bash
 python main.py
-```
-
-### Analisis con Datos Copernicus (mayor precision)
-
-```bash
-# Usar datos de Copernicus (requiere datos descargados)
-python main.py --copernicus
-
-# Analisis historico con Copernicus
-python main.py --date 2025-01-15 --copernicus
 ```
 
 ### Analisis para fecha especifica
@@ -427,8 +418,8 @@ jupyter lab fishing_analysis.ipynb
 | Bronze | GFW | 73 | 1,305 |
 | Bronze | Open-Meteo | 73 | 216,354 |
 | Bronze | Copernicus SST | 73 | 354,362 |
-| Bronze | Copernicus Corrientes | 24 | ~50,000 |
-| Bronze | Copernicus Olas | 24 | ~50,000 |
+| Bronze | Copernicus Corrientes | 27 | ~50,000 |
+| Bronze | Copernicus Olas | 27 | ~50,000 |
 | Silver | Fishing DB | 1 | 1,085 |
 | Silver | Marine DB | 1 | 572,793 |
 | Silver | Training Features | 1 | 213,378 |
@@ -438,16 +429,15 @@ jupyter lab fishing_analysis.ipynb
 | Tipo de Dato | Fuente | Descripcion | Periodo |
 |--------------|--------|-------------|---------|
 | SST | Copernicus Marine OSTIA | Temperatura superficial del mar | 2020-2026 |
-| Corrientes | Copernicus GLORYS | Velocidad (uo, vo) en m/s | 2024-2025 |
-| Olas | Copernicus Wave | Altura (VHM0), Periodo (VTPK), Dir (VMDR) | 2024-2025 |
-| Clorofila-a | Copernicus Ocean Colour | Concentracion en mg/m3 | 2024-2025 |
-| Olas/Viento (fallback) | Open-Meteo ERA5 | Reanalisis ECMWF | 2020-2026 |
+| Corrientes | Copernicus GLORYS | Velocidad (uo, vo) en m/s | 2024-2026 |
+| Olas | Copernicus Wave | Altura (VHM0), Periodo (VTPK), Dir (VMDR) | 2024-2026 |
+| Clorofila-a | Copernicus Ocean Colour | Concentracion en mg/m3 | 2024-2026 |
 | Pesca | Global Fishing Watch | Actividad pesquera AIS | 2020-2026 |
 | Zonas Historicas | IMARPE | Reportes del Instituto del Mar | Climatologia |
 
-### Prioridad de Datos
-1. **Copernicus** (Principal): Datos satelitales de alta precision
-2. **Open-Meteo** (Fallback): Cuando no hay datos de Copernicus disponibles
+### Fuente de Datos
+- **Copernicus Marine Service**: Unica fuente de datos oceanograficos (SST, corrientes, olas, clorofila)
+- Si la fecha solicitada no tiene datos, usa automaticamente el dia mas reciente disponible (hasta 3 dias)
 
 ## Especies Objetivo (5)
 
@@ -511,7 +501,6 @@ Resultado: 18 tests passed
 - Dependencias principales:
   - numpy, pandas, scipy
   - scikit-learn (ML)
-  - folium (mapas)
   - requests (APIs)
   - xarray, netCDF4, h5py (datos NetCDF)
   - copernicusmarine (Copernicus API)
@@ -550,4 +539,4 @@ Desarrollado para pesca con spinning desde orilla en la costa sur de Peru.
 
 ---
 
-*Ultima actualizacion: 2026-02-03*
+*Ultima actualizacion: 2026-03-28*

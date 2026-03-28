@@ -1,8 +1,10 @@
 # Plan de Reestructuracion UI - Mapa de Pesca
 
 **Fecha:** 2026-02-22
-**Estado:** COMPLETADO
+**Estado:** ✅ COMPLETADO
 **Archivo objetivo:** `views/map_view.py` (2089 lineas -> ~150 lineas coordinador)
+
+> **Actualización 2026-03-28:** La capa de visualización fue migrada de Folium (Leaflet.js) a **deck.gl + MapLibre GL JS** para rendering GPU (WebGL). Los componentes mantienen la misma arquitectura pero ya no dependen de `folium`. El mapa soporta 224k+ spots sin lag y está desplegado en GitHub Pages.
 
 ---
 

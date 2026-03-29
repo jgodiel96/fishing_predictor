@@ -147,37 +147,30 @@ class Sentinel2Downloader:
                     self.log(f"    ERROR buscando {year}-{month:02d}: {e}")
                     return []
 
-    def find_band_path(self, item, band_name: str) -> str:
-        """Find the S3 path to a specific band in a STAC item."""
-        # Try direct asset
-        if band_name in item.assets:
-            href = item.assets[band_name].href
-            # Convert HTTP URL to S3 key
+    def find_band_path(self, item, band_name: str, resolution: str = '20m') -> str:
+        """Find the S3 key for a band in a STAC item.
+
+        CDSE asset keys are like 'B02_20m', 'B03_10m', 'SCL_20m'.
+        Hrefs are 's3://eodata/Sentinel-2/MSI/L2A_N0500/...'
+        """
+        def href_to_key(href: str) -> str:
+            """Convert s3://eodata/... or https://.../eodata/... to S3 key."""
+            if href.startswith('s3://eodata/'):
+                return href[len('s3://eodata/'):]
             if '/eodata/' in href:
                 return href.split('/eodata/')[1]
             return href
 
-        # Try alternate keys
-        alt_keys = {
-            'B02': ['B02_10m', 'B02'], 'B03': ['B03_10m', 'B03'],
-            'B04': ['B04_10m', 'B04'], 'B08': ['B08_10m', 'B08'],
-            'B8A': ['B8A_20m', 'B8A'], 'B11': ['B11_20m', 'B11'],
-            'B12': ['B12_20m', 'B12'], 'SCL': ['SCL_20m', 'SCL']
-        }
-        for key in alt_keys.get(band_name, []):
-            if key in item.assets:
-                href = item.assets[key].href
-                if '/eodata/' in href:
-                    return href.split('/eodata/')[1]
-                return href
+        # Priority: exact resolution match, then any resolution
+        candidates = [
+            f"{band_name}_{resolution}",   # B02_20m
+            f"{band_name}_10m",            # B02_10m (for 10m bands)
+            band_name,                      # B02
+        ]
 
-        # Fallback: search in assets by band name pattern
-        for asset_key, asset in item.assets.items():
-            if band_name in asset_key or band_name.lower() in asset_key.lower():
-                href = asset.href
-                if '/eodata/' in href:
-                    return href.split('/eodata/')[1]
-                return href
+        for key in candidates:
+            if key in item.assets:
+                return href_to_key(item.assets[key].href)
 
         return None
 

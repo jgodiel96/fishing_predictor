@@ -88,6 +88,13 @@ try:
 except ImportError:
     HISTORICAL_AVAILABLE = False
 
+# V9: Sentinel-2 habitat accessibility
+try:
+    from core.sentinel2.habitat_accessibility import HabitatAccessibilityProvider
+    SENTINEL2_AVAILABLE = True
+except ImportError:
+    SENTINEL2_AVAILABLE = False
+
 # Copernicus Data Provider (currents, waves, SST from downloaded data)
 try:
     from core.copernicus_data_provider import CopernicusDataProvider, convert_to_marine_points
@@ -123,11 +130,9 @@ class AnalysisController:
     - Coordinate visualization
     """
 
-    SPECIES_BY_SUBSTRATE = {
-        "roca": ["Cabrilla", "Pintadilla", "Robalo"],
-        "arena": ["Corvina", "Lenguado", "Pejerrey"],
-        "mixto": ["Corvina", "Cabrilla", "Robalo"]
-    }
+    # Species assignment now handled by _assign_species_by_habitat()
+    # using SPECIES_DATABASE from core/cv_analysis/species_zones.py
+    _DEFAULT_SPECIES = ["Cabrilla", "Corvina", "Pejerrey"]
 
     SPECIES_LURES = {
         "Cabrilla": "Grubs 3\", jigs 15-25g",
@@ -185,6 +190,12 @@ class AnalysisController:
         self.gfw_generator: Optional['GFWHotspotGenerator'] = None
         self.dynamic_hotspots: List = []
         self.gfw_bonus: float = 0.0
+
+        # V9: Sentinel-2 habitat accessibility
+        self.habitat_provider: Optional['HabitatAccessibilityProvider'] = None
+        if SENTINEL2_AVAILABLE:
+            self.habitat_provider = HabitatAccessibilityProvider()
+            self.habitat_provider.load()  # Non-blocking: returns False if no data
 
         # Analysis date (V4) - can be overridden for historical analysis
         self.analysis_datetime: datetime = datetime.now()
@@ -1596,22 +1607,10 @@ class AnalysisController:
         return np.degrees(np.arctan2(dlon, dlat)) % 360
 
     def _get_species(self, lat: float) -> List[Dict]:
-        rocky = [(-17.7, -17.65), (-17.82, -17.78)]
-        sandy = [(-18.15, -18.05), (-17.93, -17.88)]
-
-        substrate = "mixto"
-        for (lat_min, lat_max) in rocky:
-            if lat_min <= lat <= lat_max:
-                substrate = "roca"
-                break
-        for (lat_min, lat_max) in sandy:
-            if lat_min <= lat <= lat_max:
-                substrate = "arena"
-                break
-
+        """Placeholder species — overridden by _assign_species_by_habitat()."""
         return [
             {'name': s, 'lure': self.SPECIES_LURES.get(s, '')}
-            for s in self.SPECIES_BY_SUBSTRATE.get(substrate, [])[:3]
+            for s in self._DEFAULT_SPECIES
         ]
 
     # ================================================================
@@ -1714,16 +1713,50 @@ class AnalysisController:
         self._spot_coastal_distances = dists  # meters
 
     def _assign_substrate_vectorized(self):
-        """Assign substrate based on GEBCO depth (Option A) + ground truth override."""
+        """Assign substrate: Sentinel-2 stability map (V9) → GEBCO fallback → encuestas override."""
         N = len(self.sampled_spots)
         depths = self._spot_depths
 
-        # Base model: depth-based (GEBCO)
-        # depth > 0m    → intertidal/rock (above water or very shallow)
-        # -5m to 0m     → mixed (shallow zone, rompiente)
-        # depth < -5m   → sand (deeper, flat bottom)
-        substrates = np.where(depths > 0, 'rock',
-                     np.where(depths > -5, 'mixed', 'sand'))
+        # V9: Try Sentinel-2 stability map first (most accurate)
+        s2_used = False
+        if SENTINEL2_AVAILABLE and self.habitat_provider and self.habitat_provider._loaded:
+            spot_lats, spot_lons = self._get_spot_arrays()
+            habitat_features = self.habitat_provider.get_features_batch(spot_lats, spot_lons)
+            self._habitat_features = habitat_features  # Store for ML features
+
+            # Get substrate from stability map
+            try:
+                from scipy.spatial import cKDTree
+                data = self.habitat_provider._data
+                coords_m = np.column_stack([
+                    data['lat'].values * 111000.0,
+                    data['lon'].values * 111000.0 * np.cos(np.radians(data['lat'].mean()))
+                ])
+                tree = cKDTree(coords_m)
+                cos_lat = np.cos(np.radians(spot_lats.mean()))
+                query_m = np.column_stack([spot_lats * 111000.0, spot_lons * 111000.0 * cos_lat])
+                dists, indices = tree.query(query_m)
+
+                valid = dists < 2000  # Within 2km
+                substrates = np.where(depths > 0, 'rock',
+                             np.where(depths > -5, 'mixed', 'sand'))  # Fallback
+
+                if np.sum(valid) > 0:
+                    s2_substrates = data['dominant_substrate'].values[indices[valid]]
+                    substrates[valid] = s2_substrates
+                    s2_used = True
+                    print(f"      Sustrato Sentinel-2: {np.sum(valid)} spots con datos satelitales")
+            except Exception as e:
+                print(f"[WARN] Sentinel-2 substrate lookup failed: {e}")
+                substrates = np.where(depths > 0, 'rock',
+                             np.where(depths > -5, 'mixed', 'sand'))
+        else:
+            self._habitat_features = None
+
+        if not s2_used:
+            # Fallback: depth-based heuristic (GEBCO)
+            substrates = np.where(depths > 0, 'rock',
+                         np.where(depths > -5, 'mixed', 'sand'))
 
         # Override with ground truth from encuestas
         encuestas_path = Path(__file__).parent.parent / 'data' / 'encuestas_pesca.json'

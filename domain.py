@@ -288,9 +288,13 @@ FEATURE_NAMES: Tuple[str, ...] = (
     'hotspot_distance', 'hotspot_similarity',
     # Temporal features (3)
     'hour_score', 'moon_score', 'season_score',
+    # Habitat morphodynamics features (6) — V9 Sentinel-2
+    'habitat_accessibility', 'substrate_stability',
+    'waterline_anomaly', 'seasonal_burial_risk',
+    'days_since_substrate_change', 'sand_advance_rate',
 )
 
-N_FEATURES = len(FEATURE_NAMES)  # 32
+N_FEATURES = len(FEATURE_NAMES)  # 38
 
 
 # =============================================================================

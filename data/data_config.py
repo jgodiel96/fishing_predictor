@@ -79,6 +79,10 @@ class DataConfig:
     RAW_WAVES_DIR = RAW_DIR / "waves"
     RAW_WAVES_COPERNICUS = RAW_WAVES_DIR / "copernicus"
 
+    # Sentinel-2 optical imagery (coastal morphodynamics V9)
+    RAW_SENTINEL2 = RAW_DIR / "sentinel2"
+    RAW_SENTINEL2_SCENES = RAW_SENTINEL2 / "scenes"
+
     # User-submitted sightings (append-only)
     RAW_USER_SIGHTINGS = RAW_DIR / "user_sightings" / "sightings.jsonl"
 
@@ -102,6 +106,11 @@ class DataConfig:
     # Consolidation log for tracking regeneration
     CONSOLIDATION_LOG = PROCESSED_DIR / "_consolidation_log.json"
 
+    # Sentinel-2 processed (Silver)
+    PROCESSED_SENTINEL2 = PROCESSED_DIR / "sentinel2"
+    PROCESSED_SUBSTRATE_MAPS = PROCESSED_SENTINEL2 / "substrate_maps"
+    PROCESSED_WATERLINES = PROCESSED_SENTINEL2 / "waterlines.parquet"
+
     # ==========================================================================
     # GOLD LAYER (Analytics) - VERSIONED, ML-READY
     # ==========================================================================
@@ -113,6 +122,14 @@ class DataConfig:
     CURRENT_DIR = ANALYTICS_DIR / "current"
     CURRENT_TRAINING = CURRENT_DIR / "training_dataset.parquet"
     MODEL_METADATA = CURRENT_DIR / "model_metadata.json"
+
+    # Sentinel-2 analytics (Gold)
+    ANALYTICS_SENTINEL2 = ANALYTICS_DIR / "sentinel2"
+    STABILITY_MAP = ANALYTICS_SENTINEL2 / "stability_map.parquet"
+    DISPLACEMENT_TIMESERIES = ANALYTICS_SENTINEL2 / "displacement_timeseries.parquet"
+    SAND_CORRIDORS = ANALYTICS_SENTINEL2 / "sand_corridors.geojson"
+    WATERLINE_TIMESERIES = ANALYTICS_SENTINEL2 / "waterline_timeseries.parquet"
+    SEASONAL_COMPOSITES = ANALYTICS_SENTINEL2 / "seasonal_composites"
 
     # Historical versions for reproducibility
     VERSIONS_DIR = ANALYTICS_DIR / "versions"

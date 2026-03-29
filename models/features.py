@@ -244,8 +244,8 @@ class FeatureExtractor:
             is_major_period=is_major
         )
 
-    def _to_vector(self, feat: MarineFeatures) -> List[float]:
-        """Convert MarineFeatures to 32-element vector."""
+    def _to_vector(self, feat: MarineFeatures, habitat_features: tuple = None) -> List[float]:
+        """Convert MarineFeatures to 38-element vector."""
         # Current components
         rad = np.radians(feat.current_direction)
         current_u = feat.current_speed * np.sin(rad)
@@ -319,7 +319,9 @@ class FeatureExtractor:
             # Temporal features (3)
             hour_score,
             moon_score,
-            season_score
+            season_score,
+            # Habitat morphodynamics features (6) — V9 Sentinel-2
+            *(habitat_features if habitat_features else (0.5, 0.5, 0.0, 0.0, 0.5, 0.0))
         ]
 
     # === SST Analysis ===

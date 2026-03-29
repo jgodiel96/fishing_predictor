@@ -185,31 +185,41 @@ AWS_SECRET_ACCESS_KEY = "<from .env>"
   )
   ```
 
-- [ ] **1.5** Descargar año proof-of-concept: **2023**
-  - ~6 escenas/mes × 12 meses = ~72 escenas
-  - ~33 MB/escena (franja costera) = ~2.4 GB
-  - Validar contra 29 puntos de ground truth antes de expandir
+- [ ] **1.5** Descargar en dos etapas:
+  - **Etapa A (PoC):** Año 2023 (~72 escenas, ~2.4 GB) — validar contra 29 puntos ground truth
+  - **Etapa B (completo):** 10 años 2015-2025 (~650 escenas, ~21 GB) — tras validar PoC
+
+  Los 10 años cubren:
+  - El Niño 2015-16 (fuerte) y 2023-24 (moderado)
+  - La Niña 2020-2022
+  - Múltiples ciclos estacionales (verano/invierno)
+  - 2015-2017: solo Sentinel-2A (~10 días revisita, ~36 escenas/año)
+  - 2017-2025: Sentinel-2A + 2B (~5 días revisita, ~72 escenas/año)
 
 #### Estructura Bronze
 
 ```
 data/raw/sentinel2/
     scenes/
+        2015-06/          # Primer mes disponible Sentinel-2
+            S2_20150623_bands.tif
+        ...
         2023-01/
             S2_20230105_bands.tif
             S2_20230110_bands.tif
-        2023-02/
-            ...
+        ...
+        2025-12/
+            S2_20251225_bands.tif
     _manifest.json
 ```
 
 #### Estimación almacenamiento
 
-| Período | Escenas | Tamaño |
-|---|---|---|
-| 1 año PoC (2023) | ~72 | ~2.4 GB |
-| 3 años (2022-2024) | ~216 | ~7 GB |
-| 6 años (2020-2025) | ~432 | ~14 GB |
+| Período | Escenas | Tamaño | Cobertura ENSO |
+|---|---|---|---|
+| 1 año PoC (2023) | ~72 | ~2.4 GB | El Niño moderado |
+| 3 años (2022-2024) | ~216 | ~7 GB | La Niña + El Niño |
+| **10 años (2015-2025)** | **~650** | **~21 GB** | **2 El Niño + 1 La Niña + neutral** |
 
 ---
 
@@ -263,6 +273,9 @@ def classify_substrate(b02, b03, b04, b8a, b11, b12, scl):
 - [ ] **2.4** Validar: calcular confusion matrix contra 29 puntos
   - Objetivo: >75% overall accuracy (basado en literatura)
   - Si <75%: ajustar umbrales o considerar RF como upgrade
+- [ ] **2.5** Tras validar PoC: clasificar las ~650 escenas de 10 años (2015-2025)
+  - Procesamiento batch con progreso incremental
+  - ~700,000 pixels costeros × 650 escenas = película completa de la costa
 
 ---
 
@@ -286,22 +299,23 @@ Para cada mes:
 - [ ] **3.2** Integrar con `tide_fetcher.py` existente
   - Para cada escena: obtener nivel mareal al momento de captura (~10:30 local)
   - Seleccionar escenas cercanas a MLW para composite
-- [ ] **3.3** Generar waterlines mensuales para 2023
+- [ ] **3.3** Generar waterlines mensuales para 10 años (2015-2025)
   - Almacenar en `data/processed/sentinel2/waterlines.parquet`
   - Schema: `date, lat, lon, ndwi_value, waterline_position_m, tide_height_m`
+  - ~120 composites mensuales (10 años × 12 meses)
 
 ---
 
 ### Fase 4: Análisis Temporal (Mapas de Estabilidad)
 
-#### Métricas por Pixel
+#### Métricas por Pixel (10 años)
 
 ```python
 @dataclass
 class StabilityMetrics:
     lat: float
     lon: float
-    dominant_substrate: str           # sustrato más frecuente
+    dominant_substrate: str           # sustrato más frecuente en 10 años
     stability_score: float            # 0-1 (1 = siempre mismo sustrato)
     rock_frequency: float             # fracción del tiempo como roca
     sand_frequency: float             # fracción del tiempo como arena
@@ -309,28 +323,103 @@ class StabilityMetrics:
     is_seasonal_burial: bool          # True si roca en verano → arena en invierno
     mean_waterline_distance_m: float  # distancia media de línea de agua
     waterline_std_m: float            # variabilidad
+    waterline_trend_m_yr: float       # tendencia acreción/erosión (m/año)
+    elnino_substrate: str             # sustrato dominante durante El Niño
+    lanina_substrate: str             # sustrato dominante durante La Niña
     n_observations: int               # escenas válidas (sin nubes)
+    first_observation: str            # fecha primera escena
+    last_observation: str             # fecha última escena
 ```
 
-#### Tareas
+#### Tareas Fase 4a: Estabilidad Temporal
 
 - [ ] **4.1** Crear `core/sentinel2/temporal_analysis.py`
-- [ ] **4.2** Para cada pixel costero a 20m, calcular:
+- [ ] **4.2** Para cada pixel costero a 20m, calcular sobre 10 años (~650 escenas):
   - Moda de sustrato (dominant_substrate)
   - Frecuencia de cada clase (rock_freq, sand_freq, water_freq)
   - Estabilidad: `n_dominant / n_observations`
   - Detección de entierro estacional: roca en verano (DJF) vs arena en invierno (JJA)
-- [ ] **4.3** Generar composites trimestrales (DJF, MAM, JJA, SON)
+  - Comportamiento ENSO: sustrato durante El Niño (2015-16, 2023-24) vs La Niña (2020-22)
+  - Tendencia de waterline: regresión lineal sobre 10 años → m/año
+- [ ] **4.3** Generar composites trimestrales (DJF, MAM, JJA, SON) para cada año
   - Moda de sustrato por pixel
   - Almacenar como GeoTIFF categórico
-- [ ] **4.4** Tracking de waterline por transecto
-  - Definir transectos perpendiculares a la costa cada 100m
-  - Calcular posición media, std, tendencia por transecto
-- [ ] **4.5** Almacenar en Gold layer
+  - 10 años × 4 trimestres = 40 composites
+
+#### Tareas Fase 4b: Análisis de Desplazamiento Vectorial de Arena
+
+Comparación escena-a-escena para trackear cómo se mueve la arena a lo largo de la costa.
+
+- [ ] **4.4** Crear `core/sentinel2/displacement_tracker.py`
+
+  Para cada par de escenas consecutivas (t, t+1):
+  ```python
+  def compute_displacement(substrate_t0, substrate_t1, transform):
+      """Detecta desplazamiento de arena entre dos clasificaciones."""
+      # Pixels que cambiaron de roca → arena (enterramiento)
+      burial = (substrate_t0 == ROCK) & (substrate_t1 == SAND)
+      # Pixels que cambiaron de arena → roca (exposición)
+      exposure = (substrate_t0 == SAND) & (substrate_t1 == ROCK)
+
+      # Centroide de cada zona de cambio → vector de desplazamiento
+      burial_centroids = get_centroids(burial, transform)
+      exposure_centroids = get_centroids(exposure, transform)
+
+      # Dirección predominante del avance de arena
+      # (vectores de burial_centroids hacia costa)
+      sand_advance_direction = compute_mean_direction(burial_centroids)
+      sand_advance_area_m2 = np.sum(burial) * 20 * 20  # pixels × resolución²
+
+      return DisplacementResult(
+          date_from=t0, date_to=t1,
+          burial_area_m2=sand_advance_area_m2,
+          exposure_area_m2=np.sum(exposure) * 400,
+          net_change_m2=sand_advance_area_m2 - np.sum(exposure) * 400,
+          sand_direction_deg=sand_advance_direction,
+          burial_zones=burial_centroids,
+          exposure_zones=exposure_centroids
+      )
+  ```
+
+- [ ] **4.5** Generar serie temporal de desplazamiento para 10 años
+  - ~650 escenas → ~649 pares consecutivos (cada 5 días)
+  - Para cada par: calcular área enterrada, área expuesta, dirección
+  - Resultado: "película" de la dinámica de arena con ~649 fotogramas
+
+- [ ] **4.6** Agregar métricas de desplazamiento al StabilityMetrics
+  ```python
+  # Métricas adicionales por pixel
+  burial_events_count: int            # veces que fue enterrado en 10 años
+  exposure_events_count: int          # veces que fue expuesto
+  mean_burial_duration_days: float    # duración media de enterramiento
+  max_burial_duration_days: float     # enterramiento más largo
+  last_transition_date: str           # última vez que cambió sustrato
+  days_since_last_change: int         # estabilidad reciente
+  sand_advance_direction_deg: float   # dirección predominante del avance
+  sand_advance_rate_m2_yr: float      # velocidad de avance anual
+  ```
+
+- [ ] **4.7** Generar mapa de "corredores de arena"
+  - Zonas donde la arena se mueve consistentemente en una dirección
+  - Identifica puntas rocosas que actúan como barreras
+  - Identifica bahías donde la arena rota estacionalmente (beach rotation)
+
+- [ ] **4.8** Tracking de waterline por transecto
+  - Definir transectos perpendiculares a la costa cada 100m (~2,810 transectos)
+  - Calcular posición media, std, tendencia por transecto sobre 10 años
+
+- [ ] **4.9** Almacenar en Gold layer
   ```
   data/analytics/sentinel2/
-      stability_map.parquet          # métricas por pixel
-      waterline_timeseries.parquet   # posición waterline por transecto/mes
+      stability_map.parquet              # métricas por pixel (10 años)
+      displacement_timeseries.parquet    # desplazamiento entre escenas consecutivas
+      sand_corridors.geojson             # corredores de movimiento de arena
+      waterline_timeseries.parquet       # posición waterline por transecto/mes
+      seasonal_composites/               # 40 composites (10 años × 4 trimestres)
+          DJF_2015_substrate.tif
+          MAM_2015_substrate.tif
+          ...
+          SON_2025_substrate.tif
   ```
 
 ---
@@ -356,14 +445,16 @@ def compute_habitat_accessibility(lat, lon, stability_map, current_substrate):
     return min(1.0, base + stability_bonus - burial_penalty)
 ```
 
-#### 4 Features Nuevos (32 → 36)
+#### 6 Features Nuevos (32 → 38)
 
-| Index | Feature | Descripción | Rango |
-|---|---|---|---|
-| 32 | `habitat_accessibility` | Score de sustrato actual | 0-1 |
-| 33 | `substrate_stability` | Estabilidad temporal del sustrato | 0-1 |
-| 34 | `waterline_anomaly` | Posición waterline vs media (unidades std) | -3 a +3 |
-| 35 | `seasonal_burial_risk` | Probabilidad de entierro estacional | 0-1 |
+| Index | Feature | Descripción | Rango | Fuente |
+|---|---|---|---|---|
+| 32 | `habitat_accessibility` | Score de sustrato actual | 0-1 | Clasificación más reciente |
+| 33 | `substrate_stability` | Estabilidad temporal (10 años) | 0-1 | Fase 4a |
+| 34 | `waterline_anomaly` | Posición waterline vs media | -3 a +3 std | Fase 3 |
+| 35 | `seasonal_burial_risk` | Probabilidad de entierro estacional | 0-1 | Fase 4a |
+| 36 | `days_since_substrate_change` | Días desde último cambio de sustrato | 0-3650 (normalizado) | Fase 4b |
+| 37 | `sand_advance_rate` | Velocidad de avance de arena (m²/año) | 0-1 (normalizado) | Fase 4b |
 
 #### Tareas
 
@@ -372,11 +463,11 @@ def compute_habitat_accessibility(lat, lon, stability_map, current_substrate):
   - Lookup espacial con `scipy.spatial.cKDTree`
   - Retorna 4 valores por spot
 - [ ] **5.2** Actualizar `domain.py`
-  - Agregar 4 features a `FEATURE_NAMES` (32 → 36)
-  - Actualizar `N_FEATURES = 36`
+  - Agregar 6 features a `FEATURE_NAMES` (32 → 38)
+  - Actualizar `N_FEATURES = 38`
   - Agregar `habitat_accessibility: float = 0.10` a `ScoringWeights`
 - [ ] **5.3** Actualizar `models/features.py`
-  - Extender `_to_vector()` para indices 32-35
+  - Extender `_to_vector()` para indices 32-37
   - Agregar `_extract_habitat_features()` con lookup a stability_map
 - [ ] **5.4** Actualizar `controllers/analysis.py`
   - Importar `HabitatAccessibilityProvider` (try/except, opcional)
@@ -424,23 +515,30 @@ core/sentinel2/
     __init__.py
     spectral_classifier.py         # Fase 2: MNDWI + B11/B12 + BSI
     waterline_extractor.py         # Fase 3: NDWI 10m + CWM
-    temporal_analysis.py           # Fase 4: estabilidad + composites
+    temporal_analysis.py           # Fase 4a: estabilidad + composites
+    displacement_tracker.py        # Fase 4b: desplazamiento vectorial de arena
     habitat_accessibility.py       # Fase 5: score para ML pipeline
 
 scripts/
     download_sentinel2.py          # Fase 1: CDSE STAC → GeoTIFF
 
-data/raw/sentinel2/                # Bronze (inmutable)
-    scenes/YYYY-MM/*.tif
+data/raw/sentinel2/                # Bronze (inmutable) ~21 GB
+    scenes/
+        2015-06/*.tif              # Primer Sentinel-2
+        ...
+        2025-12/*.tif
     _manifest.json
 
 data/processed/sentinel2/          # Silver (regenerable)
-    substrate_maps/*.tif
-    waterlines.parquet
+    substrate_maps/*.tif           # 1 clasificación por escena (~650)
+    waterlines.parquet             # waterlines mensuales (120 meses)
 
 data/analytics/sentinel2/          # Gold (ML-ready)
-    stability_map.parquet
-    waterline_timeseries.parquet
+    stability_map.parquet          # métricas 10 años por pixel
+    displacement_timeseries.parquet # desplazamiento entre escenas (~649 pares)
+    sand_corridors.geojson         # corredores de movimiento de arena
+    waterline_timeseries.parquet   # posición por transecto/mes
+    seasonal_composites/           # 40 composites trimestrales
 ```
 
 ---
@@ -476,20 +574,22 @@ scikit-image>=0.21.0       # find_contours para waterline
 ## Orden de Implementación
 
 ```
-Fase 0 (Quick Wins)     ~30 min    Sin dependencias externas
+Fase 0 (Quick Wins)      ~30 min     Sin dependencias externas
          ↓
-Fase 1 (Datos CDSE)     ~2 días    Registro + download 2023
+Fase 1 (Datos CDSE)      ~3 días     Registro + download PoC 2023 + expandir 10 años
          ↓
-Fase 2 (Clasificación)  ~2 días    Decision tree + validación
+Fase 2 (Clasificación)   ~2 días     Decision tree + validación + batch 650 escenas
          ↓
-Fase 3 (Waterline)      ~1 día     NDWI 10m + CWM
+Fase 3 (Waterline)       ~1 día      NDWI 10m + CWM 120 meses
          ↓
-Fase 4 (Temporal)       ~1 día     Stability maps + composites
+Fase 4a (Estabilidad)    ~1 día      Stability maps 10 años + composites
          ↓
-Fase 5 (Integración)    ~2 días    Features 32→36 + retraining
+Fase 4b (Desplazamiento) ~2 días     Tracking vectorial + corredores + ENSO
+         ↓
+Fase 5 (Integración)     ~2 días     Features 32→38 + retraining
 ```
 
-**Total estimado: ~8 días de desarrollo**
+**Total estimado: ~11 días de desarrollo**
 
 Cada fase es funcional e independiente — se valida antes de pasar a la siguiente.
 
@@ -503,6 +603,9 @@ Cada fase es funcional e independiente — se valida antes de pasar a la siguien
 | Correlación sustrato↔especies capturadas | Significativa (p<0.05) | Chi-squared test encuestas |
 | Score ML no degrada | ≤2% pérdida vs baseline 32 features | Cross-validation |
 | Detección de entierro estacional | ≥3 zonas identificadas | Inspección visual composites |
+| Corredores de arena identificados | ≥2 corredores principales | sand_corridors.geojson |
+| Diferencia El Niño vs La Niña detectable | Cambio significativo en rock_freq | t-test entre períodos |
+| Cobertura temporal | ≥600 escenas procesadas | _manifest.json |
 | Tiempo de predicción | <5s adicionales | Benchmark hot path |
 
 ---
